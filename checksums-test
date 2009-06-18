@@ -1,0 +1,32 @@
+#!/bin/bash
+
+set -e
+
+FILE='checksums.c'
+FILE_SHA1='a2d5138f88461334847b33796843e300b208e1af'
+FILE_MD5='1f7b8257505922f40f5c27ed89d83d70'
+
+# cleaning the attributes
+getfattr $FILE | while read attr; do
+    case $attr in
+        user.md5|user.sha1)
+            setfattr -x $attr $FILE 
+            ;;
+    esac
+done
+
+# calculating checksums
+./checksums $FILE
+
+# checking the results
+getfattr --dump --encoding=hex $FILE | while read attr; do
+    case $attr in
+        user.md5=*)
+            test $attr = "user.md5=0x$FILE_MD5"
+            ;;
+        user.sha1=*)
+            test $attr = "user.sha1=0x$FILE_SHA1"
+            ;;
+    esac
+done
+
