@@ -2,9 +2,11 @@
 
 set -e
 
-FILE='checksums.c'
-FILE_SHA1='a2d5138f88461334847b33796843e300b208e1af'
-FILE_MD5='1f7b8257505922f40f5c27ed89d83d70'
+FILE='checksums-test.tmp'
+trap "rm -f $FILE" EXIT
+echo 'checksums' >$FILE
+FILE_SHA1='eeaeb6659e4e5389f4f61dce515f8da2407e3a1d'
+FILE_MD5='62b75f24753634ab68aa2e12a2de4aee'
 
 # cleaning the attributes
 getfattr $FILE | while read attr; do
