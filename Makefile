@@ -1,14 +1,14 @@
 
 include VERSION
 
-BINS = checksums test-unit
+BINS = checksums parec-test
 LIBS = libparec.so
 CFLAGS = -g -std=c99 -I. -Wall -W -Wmissing-prototypes
 LDFLAGS = -lcrypto -L. -lparec
 
 default: $(BINS) $(LIBS)
 
-%: %.c
+%: %.c $(LIBS)
 	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
 
 %.o: %.c
@@ -16,7 +16,6 @@ default: $(BINS) $(LIBS)
 
 parec_log4c.o: parec_log4c.c parec_log4c.h
 parec.o: parec.c parec.h parec_log4c.h
-checksums: checksums.c $(LIBS)
 
 libparec.so: parec.o parec_log4c.o
 	$(CC) -shared -o $@ $^
@@ -24,7 +23,7 @@ libparec.so: parec.o parec_log4c.o
 default: $(BINS)
 
 test: $(BINS)
-	LD_LIBRARY_PATH=$(CURDIR) ./test-unit
+	LD_LIBRARY_PATH=$(CURDIR) ./parec-test
 	./checksums-test
 
 clean: 
