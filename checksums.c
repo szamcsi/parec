@@ -1,5 +1,11 @@
 /*
- * checksums -- calculating multiple checksums in parallel
+ * parec -- Parallel Recursive Checksums
+ * 
+ * Calculating multiple checksums in parallel in a directory
+ * tree and storing the results into extended attributes.
+ * 
+ * Checksum of the files is based on their content.
+ * Checksum of directories is based on the checksum of the files they contain.
  *
  * Copyright, 2009.
  *   Akos FROHNER <akos@frohner.hu>
@@ -8,80 +14,51 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <openssl/evp.h>
 #include <sys/xattr.h>
+#include <parec.h>
 
-int algorithms = 2;
-unsigned char ns_prefix[] = "user.";
-unsigned char *algorithm[] = { "sha1", "md5" };
-const EVP_MD *evp_algorithm[2];
-unsigned char *digest[2];
-unsigned int dlen[2];
-const unsigned int BUFLEN = 1024 * 1024;
+const char ns_prefix[] = "user.";
+const char *algorithm[] = { "sha1", "md5" };
+char x_name[255];
+unsigned char x_value[255];
+ssize_t x_len;
 
-void print_hex(unsigned char *bs, unsigned int n) {
-    for(int i = 0; i < n; i++) {
-        printf("%02x", bs[i]);
-    }
-}
+int main(int argc, char *argv[]) {
+    parec_ctx *ctx;
 
-int process_file(char *fname) {
-    int n,rc;
-    unsigned char buffer[BUFLEN];
-    EVP_MD_CTX ctx[2];
-
-    FILE *f = fopen(fname, "rb");
-    if(!f) {
-        perror(fname);
+    if(!(ctx = parec_new())) {
+        fprintf(stderr, "ERROR: Could not initialize the library.\n");
         return 1;
     }
 
-    // processing the file by blocks
-    for (int a = 0; a < algorithms; a++) {
-        EVP_DigestInit(&ctx[a], evp_algorithm[a]);
+    if(parec_add_checksum(ctx, "md5")) {
+        fprintf(stderr, "ERROR: %s\n", parec_get_error(ctx));
+        return 1;
     }
-    while (feof(f) == 0) {
-        n = fread(buffer, sizeof (unsigned char), BUFLEN, f);
-        if (n > 0) {
-            // processing one block
-            for (int a = 0; a < algorithms; a++) {
-                EVP_DigestUpdate(&ctx[a], buffer, n);
-            }
-        }
+    if(parec_add_checksum(ctx, "sha1")) {
+        fprintf(stderr, "ERROR: %s\n", parec_get_error(ctx));
+        return 1;
     }
-    for (int a = 0; a < algorithms; a++) {
-        EVP_DigestFinal (&ctx[a], digest[a], &(dlen[a]));
-    }
-
-    fclose(f);
-    for (int a = 0; a < algorithms; a++) {
-        printf("%s(%s) = ", algorithm[a], fname);
-        print_hex(digest[a], dlen[a]);
-        printf("\n");
-        strncpy(buffer, ns_prefix, BUFLEN);
-        strncpy(buffer + sizeof(ns_prefix) - 1, algorithm[a], BUFLEN - sizeof(ns_prefix)); 
-        if(rc = setxattr(fname, buffer, digest[a], dlen[a], XATTR_CREATE)) {
-            fprintf(stderr, "Setting attribute %s has failed on %s with %d.\n", buffer, fname, rc);
-        }
-    }
-    return 0;
-}
-
-int main(int argc, char *argv[]) {
-    OpenSSL_add_all_digests();
-    for (int a = 0; a < algorithms; a++) {
-        if(!(evp_algorithm[a] = EVP_get_digestbyname(algorithm[a]))) {
-            fprintf(stderr, "Could not load digest: %s\n", algorithm[a]);
-            return 1;
-        }
-        if(!(digest[a] = (unsigned char *) malloc(EVP_MAX_MD_SIZE))) {
-            fprintf(stderr, "Could not allocate memory for the digest (%s)\n", algorithm[a]);
-            return 1;
-        }
-    }
-
 
     for (int i = 1; i < argc; i++) {
-        process_file(argv[i]);
+        if(parec_file(ctx, argv[i])) {
+            fprintf(stderr, "ERROR: %s\n", parec_get_error(ctx));
+            return 1;
+        }
+        for (int a = 0; a < 2; a++) {
+            strncpy(x_name, ns_prefix, 255);
+            strncpy(x_name + strlen(ns_prefix), algorithm[a], 255 - strlen(ns_prefix));
+            if((x_len = getxattr(argv[i], x_name, x_value, 255)) < 0) {
+                fprintf(stderr, "Getting attribute %s has failed on %s\n", x_name, argv[i]);
+                return 1;
+            }
+            printf("%s(%s) = ", algorithm[a], argv[i]);
+            for(int d = 0; d < x_len; d++) {
+                printf("%02x", x_value[d]);
+            }
+            printf("\n");
+        }
     }
+
+    parec_free(ctx);
 }

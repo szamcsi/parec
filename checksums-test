@@ -2,33 +2,74 @@
 
 set -e
 
-FILE='checksums-test.tmp'
-trap "rm -f $FILE" EXIT
-echo 'checksums' >$FILE
-FILE_SHA1='eeaeb6659e4e5389f4f61dce515f8da2407e3a1d'
-FILE_MD5='62b75f24753634ab68aa2e12a2de4aee'
+tmpprefix='checksums-test.tmp'
+trap "rm -f $tmpprefix*" EXIT
 
-# cleaning the attributes
-getfattr $FILE | while read attr; do
-    case $attr in
-        user.md5|user.sha1)
-            setfattr -x $attr $FILE 
-            ;;
-    esac
-done
+function create_tree {
+    # creating a test tree
+    mkdir -p dataset
+    echo '1' >dataset/file1
+    echo '2' >dataset/file2
+    echo '3' >dataset/file3
+    mkdir -p dataset/subdir1
+    echo '11' >dataset/subdir1/file11
+    echo '12'  >dataset/subdir1/file12
+    mkdir -p dataset/subsubdir11
+    echo '111' >dataset/subsubdir11/file111
+    mkdir -p dataset/subdir2
+    echo '21' >dataset/subdir2/file21
+    echo '22' >dataset/subdir2/file22
+
+    # calculating checksums the traditional way
+    find dataset -type f | xargs sha1sum >$tmpprefix.sha1sum
+    find dataset -type f | xargs md5sum >$tmpprefix.md5sum
+}
+
+function clean_file {
+    local file="$1"
+    getfattr $file | while read attr; do
+        case $attr in
+            user.md5|user.sha1)
+                setfattr -x $attr $file
+                ;;
+        esac
+    done
+}
+
+function clean_tree {
+    find dataset | while read file; do
+        clean_file $file
+    done
+}
+
+function check_file {
+    local file="$1"
+    # checking the results
+    getfattr --dump --encoding=hex $file | while read attr; do
+        case $attr in
+            user.md5=*)
+                checksum=$(grep $file $tmpprefix.md5sum | cut -d\  -f 1)
+                test $attr = "user.md5=0x$checksum"
+                ;;
+            user.sha1=*)
+                checksum=$(grep $file $tmpprefix.sha1sum | cut -d\  -f 1)
+                test $attr = "user.sha1=0x$checksum"
+                ;;
+        esac
+    done
+}
+
+function check_tree {
+    find dataset | while read file; do
+        check_file $file
+    done
+}
+
+create_tree
+clean_tree
 
 # calculating checksums
-./checksums $FILE
+find dataset -type f | xargs ./checksums 
 
-# checking the results
-getfattr --dump --encoding=hex $FILE | while read attr; do
-    case $attr in
-        user.md5=*)
-            test $attr = "user.md5=0x$FILE_MD5"
-            ;;
-        user.sha1=*)
-            test $attr = "user.sha1=0x$FILE_SHA1"
-            ;;
-    esac
-done
+check_tree
 
