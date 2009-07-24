@@ -15,6 +15,7 @@
 #include <stdarg.h>
 #define _GNU_SOURCE
 #include <string.h>
+#include <errno.h>
 #include <openssl/evp.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -36,8 +37,7 @@ struct _parec_ctx {
     char                        *xattr_prefix;
     char                        *xattr_mtime;
     char                        **xattr_algorithm;
-    parec_verification_method   verify_method;
-    parec_calculation_method    calc_method;
+    parec_method                method;
     char                        *error_message;
 };
 
@@ -113,11 +113,7 @@ parec_ctx *parec_new()
         return ctx;
     }
 
-    if(parec_set_verification_method(ctx, PAREC_VERIFY_NO)) {
-        parec_free(ctx);
-        return NULL;
-    }
-    if(parec_set_calculation_method(ctx, PAREC_CALC_DEFAULT)) {
+    if(parec_set_method(ctx, PAREC_METHOD_DEFAULT)) {
         parec_free(ctx);
         return NULL;
     }
@@ -373,21 +369,33 @@ int parec_set_xattr_prefix(parec_ctx *ctx, const char *prefix)
     return 0;
 }
 
-int parec_set_verification_method(parec_ctx *ctx, parec_verification_method method)
+int parec_set_method(parec_ctx *ctx, parec_method method)
 {
     PAREC_CHECK_CONTEXT(ctx)
 
-    ctx->verify_method = method;
+    ctx->method = method;
 
     return 0;
 }
 
-int parec_set_calculation_method(parec_ctx *ctx, parec_calculation_method method)
+/* Purging extended attributes */
+static int _parec_purge(parec_ctx *ctx, const char *name)
 {
-    PAREC_CHECK_CONTEXT(ctx)
-
-    ctx->calc_method = method;
-
+    int rc;
+    for (int a = 0; a < ctx->algorithms; a++) {
+        parec_log4c_DEBUG("Removing xattr(%s)", ctx->xattr_algorithm[a]);
+        // sliently ignoring, if the attribute was not set before
+        if((rc = removexattr(name, ctx->xattr_algorithm[a])) && (errno != ENODATA)) {
+            PAREC_ERROR(ctx, "parec: removing attribute %s has failed on %s with '%s(%d)'.\n", ctx->xattr_algorithm[a], name, strerror(errno), errno);
+            return -1;
+        }
+    }
+    parec_log4c_DEBUG("Removing xattr(%s)", ctx->xattr_mtime);
+    // sliently ignoring, if the attribute was not set before
+    if((rc = removexattr(name, ctx->xattr_mtime)) && (errno != ENODATA)) {
+        PAREC_ERROR(ctx, "parec: removing attribute %s has failed on %s with '%s(%d)'.\n", ctx->xattr_mtime, name, strerror(errno), errno);
+        return -1;
+    }
     return 0;
 }
 
@@ -395,19 +403,21 @@ int parec_file(parec_ctx *ctx, const char *filename) {
     int a,n,rc;
     unsigned char buffer[BUFLEN];
     EVP_MD_CTX *md_ctx;
-    unsigned char digest[EVP_MAX_MD_SIZE];
+    unsigned char digest[EVP_MAX_MD_SIZE], x_digest[EVP_MAX_MD_SIZE];
     unsigned int dlen;
-    time_t   start_mtime, end_mtime;
+    time_t   start_mtime, end_mtime, x_mtime = 0;
     struct stat p_stat;
 
     PAREC_CHECK_CONTEXT(ctx)
 
-    if((rc = parec_init_evp(ctx))) return rc;
+    if (ctx->method == PAREC_METHOD_PURGE) {
+        return _parec_purge(ctx, filename);
+    }
 
-    md_ctx = calloc(sizeof(*md_ctx), ctx->algorithms);
-    if(!md_ctx) {
-        PAREC_ERROR(ctx, "parec: out of memory");
-        return -1;
+    if (ctx->method == PAREC_METHOD_FORCE) {
+        if(_parec_purge(ctx, filename)) {
+            return -1;
+        }
     }
 
     parec_log4c_DEBUG("Processing file '%s'", filename);
@@ -418,6 +428,32 @@ int parec_file(parec_ctx *ctx, const char *filename) {
         return -1;
     }
     start_mtime = p_stat.st_mtime;
+
+    // trying to check, if the file was modified since the last calculation,
+    // and skip the rest, if it was not modified
+    if (ctx->method != PAREC_METHOD_CHECK) {
+        if((rc = getxattr(filename, ctx->xattr_mtime, &x_mtime, sizeof(x_mtime))) < 0 && (errno != ENODATA)) {
+            PAREC_ERROR(ctx, "parec: fetching attribute %s has failed on %s with '%s(%d)'.\n", ctx->xattr_mtime, filename, strerror(errno), errno);
+            return -1;
+        }
+        else if (rc == sizeof(x_mtime)) {
+            parec_log4c_DEBUG("comparing actual (%d) and stored (%d) mtime", start_mtime, x_mtime);
+            if (start_mtime == x_mtime) {
+                parec_log4c_INFO("checksums are already calculated, skipping '%s'", filename);
+                return 0;
+            }
+        }
+    }
+
+    // the checksums need to be actually calculated
+    if((rc = parec_init_evp(ctx))) return rc;
+
+    md_ctx = calloc(sizeof(*md_ctx), ctx->algorithms);
+    if(!md_ctx) {
+        PAREC_ERROR(ctx, "parec: out of memory");
+        return -1;
+    }
+
 
     FILE *f = fopen(filename, "rb");
     if(!f) {
@@ -449,22 +485,46 @@ int parec_file(parec_ctx *ctx, const char *filename) {
     end_mtime = p_stat.st_mtime;
 
     if(start_mtime != end_mtime) {
+        _parec_purge(ctx, filename);
         PAREC_ERROR(ctx, "parec: file %s has been modified while processing", filename);
         return -1;
     }
 
-    // generating the final checksum and storing it in an extended attribute
+    // generating the final checksum and
+    //      storing it in an extended attribute or
+    //      comparing it with a previous value
     for (a = 0; a < ctx->algorithms; a++) {
         EVP_DigestFinal (&md_ctx[a], digest, &dlen);
-        parec_log4c_DEBUG("Storing xattr(%s)", ctx->xattr_algorithm[a]);
-        if((rc = setxattr(filename, ctx->xattr_algorithm[a], digest, dlen, XATTR_CREATE))) {
-            PAREC_ERROR(ctx, "parec: setting attribute %s has failed on %s with %d.\n", ctx->xattr_algorithm[a], filename, rc);
+        if (ctx->method != PAREC_METHOD_CHECK) {
+            parec_log4c_DEBUG("Storing xattr(%s)", ctx->xattr_algorithm[a]);
+            if((rc = setxattr(filename, ctx->xattr_algorithm[a], digest, dlen, 0))) {
+                PAREC_ERROR(ctx, "parec: setting attribute %s has failed on %s with '%s(%d)'.\n", ctx->xattr_algorithm[a], filename, strerror(errno), errno);
+                return -1;
+            }
+        }
+        else {
+            parec_log4c_DEBUG("Comparing xattr(%s)", ctx->xattr_algorithm[a]);
+            if((rc = getxattr(filename, ctx->xattr_algorithm[a], &x_digest, EVP_MAX_MD_SIZE)) < 0 && (errno != ENODATA)) {
+                PAREC_ERROR(ctx, "parec: fetching attribute %s has failed on %s with '%s(%d)'.\n", ctx->xattr_algorithm[a], filename, strerror(errno), errno);
+                return -1;
+            }
+            else if ((rc != dlen) || memcmp(digest, x_digest, dlen)) {
+                PAREC_ERROR(ctx, "parec: checksums (%s) do not match", ctx->algorithm[a]);
+                return -1;
+            }
+            else {
+                parec_log4c_INFO("parec: checksums (%s) do match", ctx->algorithm[a]);
+            }
         }
     }
+
     // storing the mtime, that we know of unchanged during processing
-    parec_log4c_DEBUG("Storing xattr(%s)", ctx->xattr_mtime);
-    if((rc = setxattr(filename, ctx->xattr_mtime, &start_mtime, sizeof(start_mtime), XATTR_CREATE))) {
-        PAREC_ERROR(ctx, "parec: setting attribute %s has failed on %s with %d.\n", ctx->xattr_mtime, filename, rc);
+    if (x_mtime == 0 || ctx->method == PAREC_METHOD_FORCE) {
+        parec_log4c_DEBUG("Storing xattr(%s)", ctx->xattr_mtime);
+        if((rc = setxattr(filename, ctx->xattr_mtime, &start_mtime, sizeof(start_mtime), 0))) {
+            PAREC_ERROR(ctx, "parec: setting attribute %s has failed on %s with '%s(%d)'.\n", ctx->xattr_mtime, filename, strerror(errno), errno);
+            return -1;
+        }
     }
 
 
@@ -478,6 +538,10 @@ int parec_directory(parec_ctx *ctx, const char *dirname) {
     int rc;
 
     PAREC_CHECK_CONTEXT(ctx)
+
+    if (ctx->method == PAREC_METHOD_PURGE) {
+        return _parec_purge(ctx, dirname);
+    }
 
     if((rc = parec_init_evp(ctx))) return rc;
 

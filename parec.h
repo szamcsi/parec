@@ -23,31 +23,20 @@ extern "C" {
  */
 
 /**
- * Verification levels:
- * - NO, do not compare calculated checksums to already stored values
- * - MTIME, compare if there is already a stored value and mtime
- *          is later than the stored value
- * - IF_EXISTS, compare, if there is already a stored value
- * - STRICT, fail comparison, if there was no stored value
- */
-typedef enum {
-    PAREC_VERIFY_NO,
-    PAREC_VERIFY_MTIME,
-    PAREC_VERIFY_IF_EXISTS,
-    PAREC_VERIFY_STRICT
-} parec_verification_method;
-
-/**
- * Calculation modes:
- * - DEFAULT, calculate new checksums, if they do not exists yet
+ * Processing methods:
+ * - DEFAULT, calculate new checksums, if they do not exists yet,
+ *            or the file has changed since the last calculation
+ * - CHECK, calculate new checksums, but only compare them with
+ *          already stored values
  * - FORCE, calculate new cheksums, regarless of any stored value
  * - PURGE, delete checksums, instead of storing them
  */
 typedef enum {
-    PAREC_CALC_DEFAULT,
-    PAREC_CALC_FORCE,
-    PAREC_CALC_PURGE
-} parec_calculation_method;
+    PAREC_METHOD_DEFAULT,
+    PAREC_METHOD_CHECK,
+    PAREC_METHOD_FORCE,
+    PAREC_METHOD_PURGE
+} parec_method;
 
 
 /* Opaque data structure used by the library. */
@@ -99,20 +88,12 @@ const char *parec_get_checksum_name(parec_ctx *ctx, int idx);
 const char *parec_get_xattr_name(parec_ctx *ctx, int idx);
 
 /**
- * Set verification method.
- * @param ctx       The parec context.
- * @param method    The verification method.
- * @return 0 when successful and -1 in case of an error.
- */
-int parec_set_verification_method(parec_ctx *ctx, parec_verification_method method);
-
-/**
- * Set calculation method.
+ * Set processing method.
  * @param ctx       The parec context.
  * @param method    The calculation method.
  * @return 0 when successful and -1 in case of an error.
  */
-int parec_set_calculation_method(parec_ctx *ctx, parec_calculation_method method);
+int parec_set_method(parec_ctx *ctx, parec_method method);
 
 /**
  * Set the name prefix of the extended attributes.

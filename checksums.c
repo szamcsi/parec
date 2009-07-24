@@ -16,21 +16,26 @@
 #include <string.h>
 #include <sys/xattr.h>
 #include <parec.h>
-#include <parec_log4c.h>
 #include <getopt.h>
 
 static const char    *usage = 
 "  -h, --help               Print this help text and exit.\n"
 "  -v, --verbose            Print checksums for each file.\n"
 "  -a, --algorithm ALG      Calculate checksums using ALG.\n"
-"  -p, --prefix XP          Prefix for the extended attributes.\n";
+"  -p, --prefix XP          Prefix for the extended attributes.\n"
+"  -c, --check              Check the already calculated checksums.\n"
+"  -f, --force              Force re-calculating the checksums.\n"
+"  -w, --wipe               Purge/wipe checksum attributes.\n";
 
-static const char    *short_options = "hva:p:";
+static const char    *short_options = "hva:p:cfw";
 static struct option long_options[] = {
     {"help",        no_argument,        NULL, 'h'},
     {"verbose",     no_argument,        NULL, 'v'},
     {"algorithm",   required_argument,  NULL, 'a'},
     {"prefix",      required_argument,  NULL, 'p'},
+    {"check",       no_argument,        NULL, 'c'},
+    {"force",       no_argument,        NULL, 'f'},
+    {"wipe",        no_argument,        NULL, 'w'},
     { NULL,         no_argument,        NULL, 0}
 };
 
@@ -75,6 +80,25 @@ int main(int argc, char *argv[]) {
                     fprintf(stderr, "ERROR: %s\n", parec_get_error(ctx));
                     return 1;
                 }
+                break;
+            case 'c':
+                if(parec_set_method(ctx, PAREC_METHOD_CHECK)) {
+                    fprintf(stderr, "ERROR: %s\n", parec_get_error(ctx));
+                    return 1;
+                }
+                break;
+            case 'f':
+                if(parec_set_method(ctx, PAREC_METHOD_FORCE)) {
+                    fprintf(stderr, "ERROR: %s\n", parec_get_error(ctx));
+                    return 1;
+                }
+                break;
+            case 'w':
+                if(parec_set_method(ctx, PAREC_METHOD_PURGE)) {
+                    fprintf(stderr, "ERROR: %s\n", parec_get_error(ctx));
+                    return 1;
+                }
+                verbose_flag = 0;
                 break;
             case ':':
                 fprintf(stderr, "ERROR: option argument is missing\n");
