@@ -33,7 +33,9 @@ struct _parec_ctx {
     char                        **exclude;     // exclude patterns
     int                         excludes;      // number of exclude patterns
     int                         excl_len;      // allocation length of the exclude array
-    const char                  *xattr_prefix;
+    char                        *xattr_prefix;
+    char                        *xattr_mtime;
+    char                        **xattr_algorithm;
     parec_verification_method   verify_method;
     parec_calculation_method    calc_method;
     char                        *error_message;
@@ -42,11 +44,11 @@ struct _parec_ctx {
 /* Buffer length for file operations. */
 static const unsigned int BUFLEN = 1024 * 1024;
 static const unsigned int ERRLEN = 300;
-static const unsigned int XATTR_NAME_LEN = 255;
-static const char default_xattr_prefix[] = "user.";
-static const char mtime_xattr[] = "mtime";
+static const unsigned int XATTR_NAME_LEN = 230; // with overhead for 'user.' and alg.name
+static const char DEFAULT_XATTR_PREFIX[] = "user.";
+static const char MTIME_XATTR_NAME[] = "mtime";
 
-static void parec_set_error(parec_ctx *ctx, char *fmt, ...)
+static void _parec_set_error(parec_ctx *ctx, char *fmt, ...)
 {
     va_list ap;
     if (ctx->error_message)
@@ -57,6 +59,11 @@ static void parec_set_error(parec_ctx *ctx, char *fmt, ...)
     vsnprintf(ctx->error_message, ERRLEN, fmt, ap);
     va_end(ap);
 }
+
+#define PAREC_ERROR(ctx, fmt, ...)  _parec_set_error(ctx, fmt,##__VA_ARGS__); \
+                                    parec_log4c_ERROR(fmt,##__VA_ARGS__);
+
+#define PAREC_CHECK_CONTEXT(ctx)    if(!ctx) { parec_log4c_ERROR("Context is not initialized"); return -1; }
 
 
 const char *parec_get_error(parec_ctx *ctx)
@@ -83,12 +90,17 @@ parec_ctx *parec_new()
     ctx->alg_len = 10;
     ctx->algorithm = calloc(sizeof(*(ctx->algorithm)), ctx->alg_len);
     if(!ctx->algorithm) {
-        parec_set_error(ctx, "parec: out of memory");
+        PAREC_ERROR(ctx, "parec: out of memory");
+        return ctx;
+    }
+    ctx->xattr_algorithm = calloc(sizeof(*(ctx->xattr_algorithm)), ctx->alg_len);
+    if(!ctx->xattr_algorithm) {
+        PAREC_ERROR(ctx, "parec: out of memory");
         return ctx;
     }
     ctx->evp_algorithm = calloc(sizeof(*(ctx->evp_algorithm)), ctx->alg_len);
     if(!ctx->evp_algorithm) {
-        parec_set_error(ctx, "parec: out of memory");
+        PAREC_ERROR(ctx, "parec: out of memory");
         return ctx;
     }
     ctx->evp_initialized = 0;
@@ -97,14 +109,23 @@ parec_ctx *parec_new()
     ctx->excl_len = 10;
     ctx->exclude = calloc(sizeof(*(ctx->exclude)), ctx->excl_len);
     if(!ctx->exclude) {
-        parec_set_error(ctx, "parec: out of memory");
+        PAREC_ERROR(ctx, "parec: out of memory");
         return ctx;
     }
 
-    ctx->xattr_prefix = default_xattr_prefix;
+    if(parec_set_verification_method(ctx, PAREC_VERIFY_NO)) {
+        parec_free(ctx);
+        return NULL;
+    }
+    if(parec_set_calculation_method(ctx, PAREC_CALC_DEFAULT)) {
+        parec_free(ctx);
+        return NULL;
+    }
 
-    ctx->verify_method = PAREC_VERIFY_NO;
-    ctx->calc_method = PAREC_CALC_DEFAULT;
+    if(parec_set_xattr_prefix(ctx, DEFAULT_XATTR_PREFIX)) {
+        parec_free(ctx);
+        return NULL;
+    }
     
     return ctx;
 }
@@ -119,17 +140,19 @@ void parec_free(parec_ctx *ctx)
         // do we really need to free this OpenSSL structure?
         //if (ctx->evp_initialized)
             //free(ctx->evp_algorithm[a]);
+        free(ctx->xattr_algorithm[a]);
     }
     free(ctx->algorithm);
     free(ctx->evp_algorithm);
+    free(ctx->xattr_algorithm);
 
     for (int e = 0; e < ctx->excludes; e++) {
         free(ctx->exclude[e]);
     }
     free(ctx->exclude);
 
-    if (ctx->xattr_prefix != default_xattr_prefix) 
-        free((char *)ctx->xattr_prefix);
+    free(ctx->xattr_prefix);
+    free(ctx->xattr_mtime);
     
     if(ctx->error_message) 
         free(ctx->error_message);
@@ -139,8 +162,7 @@ void parec_free(parec_ctx *ctx)
 
 static int parec_init_evp(parec_ctx *ctx) 
 {
-    if(!ctx)
-        return -1;
+    PAREC_CHECK_CONTEXT(ctx)
 
     if (ctx->evp_initialized)
         return 0;
@@ -148,7 +170,7 @@ static int parec_init_evp(parec_ctx *ctx)
     OpenSSL_add_all_digests();
     for (int a = 0; a < ctx->algorithms; a++) {
         if(!(ctx->evp_algorithm[a] = EVP_get_digestbyname(ctx->algorithm[a]))) {
-            parec_set_error(ctx, "Could not load digest: %s", ctx->algorithm[a]);
+            PAREC_ERROR(ctx, "Could not load digest: %s", ctx->algorithm[a]);
             return -1;
         }
         parec_log4c_DEBUG("OpenSSL digest %s is initialized", ctx->algorithm[a]);
@@ -158,13 +180,28 @@ static int parec_init_evp(parec_ctx *ctx)
     return 0;
 }
 
+// we can assume that the context is initialized and xattr_prefix is set
+static char *_parec_xattr_name(parec_ctx *ctx, const char *name)
+{
+    char *x_name;
+
+    x_name = malloc(strlen(ctx->xattr_prefix) + strlen(name) + 1);
+    if(!x_name)
+        // the calling context will set the proper error message
+        return NULL;
+
+    strcpy(x_name, ctx->xattr_prefix);
+    strcat(x_name, name);
+
+    return x_name;
+}
+
 int parec_add_checksum(parec_ctx *ctx, const char *alg)
 {
-    if(!ctx)
-        return -1;
+    PAREC_CHECK_CONTEXT(ctx)
 
     if (ctx->evp_initialized) {
-        parec_set_error(ctx, "parec: checksums are already initialized, cannot add more");
+        PAREC_ERROR(ctx, "parec: checksums are already initialized, cannot add more");
         return -1;
     }
 
@@ -176,7 +213,12 @@ int parec_add_checksum(parec_ctx *ctx, const char *alg)
         ctx->alg_len *= 2;
         ctx->algorithm = realloc(ctx->algorithm, sizeof(*(ctx->algorithm)) * ctx->alg_len);
         if(!ctx->algorithm) {
-            parec_set_error(ctx, "parec: out of memory");
+            PAREC_ERROR(ctx, "parec: out of memory");
+            return -1;
+        }
+        ctx->xattr_algorithm = realloc(ctx->xattr_algorithm, sizeof(*(ctx->xattr_algorithm)) * ctx->alg_len);
+        if(!ctx->xattr_algorithm) {
+            PAREC_ERROR(ctx, "parec: out of memory");
             return -1;
         }
     }
@@ -185,7 +227,12 @@ int parec_add_checksum(parec_ctx *ctx, const char *alg)
     if(ctx->algorithms < ctx->alg_len) {
         ctx->algorithm[ctx->algorithms] = strdup(alg);
         if(!(ctx->algorithm[ctx->algorithms])) {
-            parec_set_error(ctx, "parec: out of memory");
+            PAREC_ERROR(ctx, "parec: out of memory");
+            return -1;
+        }
+        ctx->xattr_algorithm[ctx->algorithms] = _parec_xattr_name(ctx, alg);
+        if(!(ctx->xattr_algorithm[ctx->algorithms])) {
+            PAREC_ERROR(ctx, "parec: out of memory");
             return -1;
         }
         ctx->algorithms++;
@@ -194,10 +241,42 @@ int parec_add_checksum(parec_ctx *ctx, const char *alg)
     return 0;
 }
 
-int parec_add_exclude_pattern(parec_ctx *ctx, const char *pattern)
+int parec_get_checksum_count(parec_ctx *ctx)
+{
+    PAREC_CHECK_CONTEXT(ctx)
+
+    return ctx->algorithms;
+}
+
+const char *parec_get_checksum_name(parec_ctx *ctx, int idx) 
 {
     if(!ctx)
-        return -1;
+        return NULL;
+
+    if(idx < 0 || idx >= ctx->algorithms) {
+        PAREC_ERROR(ctx, "parec: index %d is out of range [0,%d)", idx, ctx->algorithms);
+        return NULL;
+    }
+
+    return ctx->algorithm[idx];
+}
+
+const char *parec_get_xattr_name(parec_ctx *ctx, int idx) 
+{
+    if(!ctx)
+        return NULL;
+
+    if(idx < 0 || idx >= ctx->algorithms) {
+        PAREC_ERROR(ctx, "parec: index %d is out of range [0,%d)", idx, ctx->algorithms);
+        return NULL;
+    }
+
+    return ctx->xattr_algorithm[idx];
+}
+
+int parec_add_exclude_pattern(parec_ctx *ctx, const char *pattern)
+{
+    PAREC_CHECK_CONTEXT(ctx)
 
     if(!pattern)
         return 0;
@@ -207,7 +286,7 @@ int parec_add_exclude_pattern(parec_ctx *ctx, const char *pattern)
         ctx->excl_len *= 2;
         ctx->exclude = realloc(ctx->exclude, sizeof(*(ctx->exclude)) * ctx->excl_len);
         if(!ctx->exclude) {
-            parec_set_error(ctx, "parec: out of memory");
+            PAREC_ERROR(ctx, "parec: out of memory");
             return -1;
         }
     }
@@ -216,7 +295,7 @@ int parec_add_exclude_pattern(parec_ctx *ctx, const char *pattern)
     if(ctx->excludes < ctx->excl_len) {
         ctx->exclude[ctx->excludes] = strdup(pattern);
         if(!(ctx->exclude[ctx->excludes])) {
-            parec_set_error(ctx, "parec: out of memory");
+            PAREC_ERROR(ctx, "parec: out of memory");
             return -1;
         }
         ctx->excludes++;
@@ -227,21 +306,67 @@ int parec_add_exclude_pattern(parec_ctx *ctx, const char *pattern)
 
 int parec_set_xattr_prefix(parec_ctx *ctx, const char *prefix)
 {
-    if(!ctx)
-        return -1;
+    int x_len;
+    PAREC_CHECK_CONTEXT(ctx)
 
-    // covering the case, when strdup() is not needed
-    if (prefix == default_xattr_prefix) {
-        ctx->xattr_prefix = default_xattr_prefix;
-        return 0;
+    // deallocating the allocated structures
+    for (int a = 0; a < ctx->algorithms; a++) {
+        free(ctx->xattr_algorithm[a]);
+    }
+    free(ctx->xattr_prefix);
+    free(ctx->xattr_mtime);
+
+    // if not specified, use the default
+    if(!prefix) 
+        prefix = DEFAULT_XATTR_PREFIX;
+
+    if(strlen(prefix) > XATTR_NAME_LEN) {
+        PAREC_ERROR(ctx, "parec: xattr prefix is too long (%d > %d): %s", strlen(prefix), XATTR_NAME_LEN, prefix);
+        return -1;
     }
 
-    // TODO: 
-    //  - adding "user.", if missing
-    //  - adding "." to the end, if missing
-    ctx->xattr_prefix = strdup(prefix);
-    if(!ctx->xattr_prefix) {
-        parec_set_error(ctx, "parec: out of memory");
+    // check, if it starts with "user."
+    if(strncmp(DEFAULT_XATTR_PREFIX, prefix, strlen(DEFAULT_XATTR_PREFIX))) {
+        ctx->xattr_prefix = malloc(strlen(DEFAULT_XATTR_PREFIX) + strlen(prefix) + 1);
+        if(!ctx->xattr_prefix) {
+            PAREC_ERROR(ctx, "parec: out of memory");
+            return -1;
+        }
+        strcpy(ctx->xattr_prefix, DEFAULT_XATTR_PREFIX); 
+        strcat(ctx->xattr_prefix, prefix);
+    }
+    else {
+        ctx->xattr_prefix = strdup(prefix);
+        if(!ctx->xattr_prefix) {
+            PAREC_ERROR(ctx, "parec: out of memory");
+            return -1;
+        }
+    }
+
+    // check, if it ends with "."
+    x_len = strlen(ctx->xattr_prefix);
+    if(ctx->xattr_prefix[x_len - 1] != '.') {
+        x_len++;
+        ctx->xattr_prefix = realloc(ctx->xattr_prefix, x_len);
+        if(!ctx->xattr_prefix) {
+            PAREC_ERROR(ctx, "parec: out of memory");
+            return -1;
+        }
+        ctx->xattr_prefix[x_len - 1] = '.';
+        ctx->xattr_prefix[x_len] = '\0';
+    }
+
+    // setting derived attributes
+    for (int a = 0; a < ctx->algorithms; a++) {
+        ctx->xattr_algorithm[a] = _parec_xattr_name(ctx, ctx->algorithm[a]);
+        if(!(ctx->xattr_algorithm[a])) {
+            PAREC_ERROR(ctx, "parec: out of memory");
+            return -1;
+        }
+    }
+    ctx->xattr_mtime = _parec_xattr_name(ctx, MTIME_XATTR_NAME);
+    if(!ctx->xattr_mtime) {
+        PAREC_ERROR(ctx, "parec: out of memory");
         return -1;
     }
 
@@ -250,8 +375,7 @@ int parec_set_xattr_prefix(parec_ctx *ctx, const char *prefix)
 
 int parec_set_verification_method(parec_ctx *ctx, parec_verification_method method)
 {
-    if(!ctx)
-        return -1;
+    PAREC_CHECK_CONTEXT(ctx)
 
     ctx->verify_method = method;
 
@@ -260,8 +384,7 @@ int parec_set_verification_method(parec_ctx *ctx, parec_verification_method meth
 
 int parec_set_calculation_method(parec_ctx *ctx, parec_calculation_method method)
 {
-    if(!ctx)
-        return -1;
+    PAREC_CHECK_CONTEXT(ctx)
 
     ctx->calc_method = method;
 
@@ -271,18 +394,19 @@ int parec_set_calculation_method(parec_ctx *ctx, parec_calculation_method method
 int parec_file(parec_ctx *ctx, const char *filename) {
     int a,n,rc;
     unsigned char buffer[BUFLEN];
-    char xattr_name[XATTR_NAME_LEN];
     EVP_MD_CTX *md_ctx;
     unsigned char digest[EVP_MAX_MD_SIZE];
     unsigned int dlen;
     time_t   start_mtime, end_mtime;
     struct stat p_stat;
 
+    PAREC_CHECK_CONTEXT(ctx)
+
     if((rc = parec_init_evp(ctx))) return rc;
 
     md_ctx = calloc(sizeof(*md_ctx), ctx->algorithms);
     if(!md_ctx) {
-        parec_set_error(ctx, "parec: out of memory");
+        PAREC_ERROR(ctx, "parec: out of memory");
         return -1;
     }
 
@@ -290,14 +414,14 @@ int parec_file(parec_ctx *ctx, const char *filename) {
 
     // checking the modification time at the beginning
     if((rc = stat(filename, &p_stat))) {
-        parec_set_error(ctx, "parec: could not stat %s (%d)", filename, rc);
+        PAREC_ERROR(ctx, "parec: could not stat %s (%d)", filename, rc);
         return -1;
     }
     start_mtime = p_stat.st_mtime;
 
     FILE *f = fopen(filename, "rb");
     if(!f) {
-        parec_set_error(ctx, "parec: could not open file '%s'", filename);
+        PAREC_ERROR(ctx, "parec: could not open file '%s'", filename);
         return -1;
     }
 
@@ -319,35 +443,28 @@ int parec_file(parec_ctx *ctx, const char *filename) {
 
     // checking the modification time at the end
     if((rc = stat(filename, &p_stat))) {
-        parec_set_error(ctx, "parec: could not stat %s (%d)", filename, rc);
+        PAREC_ERROR(ctx, "parec: could not stat %s (%d)", filename, rc);
         return -1;
     }
     end_mtime = p_stat.st_mtime;
 
     if(start_mtime != end_mtime) {
-        parec_set_error(ctx, "parec: file %s has been modified while processing", filename);
+        PAREC_ERROR(ctx, "parec: file %s has been modified while processing", filename);
         return -1;
     }
 
     // generating the final checksum and storing it in an extended attribute
     for (a = 0; a < ctx->algorithms; a++) {
         EVP_DigestFinal (&md_ctx[a], digest, &dlen);
-        // the extended attribute name = xattr_prefix + checksum_name
-        strncpy(xattr_name, ctx->xattr_prefix, XATTR_NAME_LEN);
-        strncpy(xattr_name + strlen(xattr_name), ctx->algorithm[a], 
-            XATTR_NAME_LEN - strlen(xattr_name)); 
-        parec_log4c_DEBUG("Storing xattr(%s)", xattr_name);
-        if((rc = setxattr(filename, xattr_name, digest, dlen, XATTR_CREATE))) {
-            parec_set_error(ctx, "parec: setting attribute %s has failed on %s with %d.\n", xattr_name, filename, rc);
+        parec_log4c_DEBUG("Storing xattr(%s)", ctx->xattr_algorithm[a]);
+        if((rc = setxattr(filename, ctx->xattr_algorithm[a], digest, dlen, XATTR_CREATE))) {
+            PAREC_ERROR(ctx, "parec: setting attribute %s has failed on %s with %d.\n", ctx->xattr_algorithm[a], filename, rc);
         }
     }
     // storing the mtime, that we know of unchanged during processing
-    strncpy(xattr_name, ctx->xattr_prefix, XATTR_NAME_LEN);
-    strncpy(xattr_name + strlen(xattr_name), mtime_xattr,
-        XATTR_NAME_LEN - strlen(xattr_name)); 
-    parec_log4c_DEBUG("Storing xattr(%s)", xattr_name);
-    if((rc = setxattr(filename, xattr_name, &start_mtime, sizeof(start_mtime), XATTR_CREATE))) {
-        parec_set_error(ctx, "parec: setting attribute %s has failed on %s with %d.\n", xattr_name, filename, rc);
+    parec_log4c_DEBUG("Storing xattr(%s)", ctx->xattr_mtime);
+    if((rc = setxattr(filename, ctx->xattr_mtime, &start_mtime, sizeof(start_mtime), XATTR_CREATE))) {
+        PAREC_ERROR(ctx, "parec: setting attribute %s has failed on %s with %d.\n", ctx->xattr_mtime, filename, rc);
     }
 
 
@@ -359,6 +476,8 @@ int parec_file(parec_ctx *ctx, const char *filename) {
 
 int parec_directory(parec_ctx *ctx, const char *dirname) {
     int rc;
+
+    PAREC_CHECK_CONTEXT(ctx)
 
     if((rc = parec_init_evp(ctx))) return rc;
 

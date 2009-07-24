@@ -48,7 +48,7 @@ typedef enum {
     PAREC_LOG4C_UNKNOWN
 } parec_log4c_log_level;
 
-extern void parec_log4c_printf(parec_log4c_log_level loglevel, 
+void parec_log4c_printf(parec_log4c_log_level loglevel, 
     const char *file, const char *function, const int line,
     const char *format, ...);
 

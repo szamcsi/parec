@@ -24,7 +24,7 @@ default: $(BINS)
 
 test: $(BINS)
 	LD_LIBRARY_PATH=$(CURDIR) ./parec-test
-	./checksums-test
+	LD_LIBRARY_PATH=$(CURDIR) ./checksums-test
 
 clean: 
 	rm -f $(BINS) $(LIBS) *.o 

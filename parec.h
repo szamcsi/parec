@@ -74,6 +74,31 @@ void parec_free(parec_ctx *ctx);
 int parec_add_checksum(parec_ctx *ctx, const char *alg);
 
 /**
+ * Get the number of checksums in the context.
+ * @param ctx   The parec context.
+ * @return the number of checksum algorithms and -1 in case of an error.
+ */
+int parec_get_checksum_count(parec_ctx *ctx);
+
+/**
+ * Get the name of a given checksum.
+ * @param ctx   The parec context.
+ * @param idx   The index of the checksum.
+ * @return the name of the checksum and NULL in case of an error.
+ * The caller should not deallocate the returned string.
+ */
+const char *parec_get_checksum_name(parec_ctx *ctx, int idx);
+
+/**
+ * Get the name of the extended attribute for a given checksum algorithm.
+ * @param ctx   The parec context.
+ * @param idx   The index of the checksum.
+ * @return the name of extended attribute for the checksum and NULL in case of an error.
+ * The caller should not deallocate the returned string.
+ */
+const char *parec_get_xattr_name(parec_ctx *ctx, int idx);
+
+/**
  * Set verification method.
  * @param ctx       The parec context.
  * @param method    The verification method.
