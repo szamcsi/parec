@@ -6,6 +6,7 @@ tmpprefix='checksums-test.tmp'
 trap "rm -f $tmpprefix*" EXIT
 
 function create_tree {
+    rm -rf dataset
     # creating a test tree
     mkdir -p dataset
     echo '1' >dataset/file1
@@ -29,7 +30,7 @@ function clean_file {
     local file="$1"
     getfattr $file | while read attr; do
         case $attr in
-            user.md5|user.sha1)
+            user.md5|user.sha1|user.mtime)
                 setfattr -x $attr $file
                 ;;
         esac
@@ -49,19 +50,28 @@ function check_file {
         case $attr in
             user.md5=*)
                 checksum=$(grep $file $tmpprefix.md5sum | cut -d\  -f 1)
-                test $attr = "user.md5=0x$checksum"
+                if [ $attr != "user.md5=0x$checksum" ]; then
+                    echo "MD5 checksum of '$file' has changed"
+                    return 1
+                fi
                 ;;
             user.sha1=*)
                 checksum=$(grep $file $tmpprefix.sha1sum | cut -d\  -f 1)
-                test $attr = "user.sha1=0x$checksum"
+                if [ $attr != "user.sha1=0x$checksum" ]; then
+                    echo "SHA1 checksum of '$file' has changed"
+                    return 1
+                fi
                 ;;
         esac
     done
 }
 
 function check_tree {
-    find dataset | while read file; do
+    find dataset -type f | while read file; do
         check_file $file
+        if [ $? -ne 0 ]; then
+            return $?
+        fi
     done
 }
 
@@ -69,7 +79,64 @@ create_tree
 clean_tree
 
 # calculating checksums
-find dataset -type f | xargs ./checksums 
+#find dataset -type f | xargs ./checksums 
+./checksums dataset
 
+echo -n "test 01: file checksums -- "
 check_tree
+echo "OK"
+
+# 'getfattr --only-values' ignores the '--encoding=hex' option
+dataset_md5=$(getfattr --encoding=hex --name=user.md5 dataset | awk -F= '/^user.md5/ { print $2 }')
+dataset_sha1=$(getfattr --encoding=hex --name=user.sha1 dataset | awk -F= '/^user.sha1/ { print $2 }')
+
+# changing the tree
+echo '1.changed' >dataset/file1
+
+# re-calculating the checksums
+./checksums --force dataset
+
+echo -n "test 02: file changed, checksum should differ -- "
+# expected to fail
+set +e
+check_tree
+set -e
+
+# directory checksum should have changed:
+dataset_md5_1=$(getfattr --encoding=hex --name=user.md5 dataset | awk -F= '/^user.md5/ { print $2 }')
+echo -n "test 03: changed directory checksum -- "
+if [ $dataset_md5 = $dataset_md5_1 ]; then
+    echo "MD5 checksum has not changed"
+    exit 1
+fi
+dataset_sha1_1=$(getfattr --encoding=hex --name=user.sha1 dataset | awk -F= '/^user.sha1/ { print $2 }')
+if [ $dataset_sha1 = $dataset_sha1_1 ]; then
+    echo "MD5 checksum has not changed"
+    exit 1
+fi
+echo "OK"
+
+# renaming file
+dataset_md5=$dataset_md5_1
+dataset_sha1=$dataset_sha1_1
+mv dataset/file2 dataset/changed.file2
+./checksums --force dataset
+# directory checksum should not have changed
+dataset_md5_1=$(getfattr --encoding=hex --name=user.md5 dataset | awk -F= '/^user.md5/ { print $2 }')
+echo -n "test 03: directory checksum invariant to rename -- "
+if [ $dataset_md5 != $dataset_md5_1 ]; then
+    echo "MD5 checksum has changed"
+    exit 1
+fi
+dataset_sha1_1=$(getfattr --encoding=hex --name=user.sha1 dataset | awk -F= '/^user.sha1/ { print $2 }')
+if [ $dataset_sha1 != $dataset_sha1_1 ]; then
+    echo "MD5 checksum has changed"
+    exit 1
+fi
+echo "OK"
+
+#echo $dataset_md5
+#echo $dataset_md5_1
+#echo $dataset_sha1
+#echo $dataset_sha1_1
 

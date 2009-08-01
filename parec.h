@@ -127,22 +127,13 @@ int parec_add_exclude_pattern(parec_ctx *ctx, const char *pattern);
 const char *parec_get_error(parec_ctx *ctx);
 
 /**
- * Process a file.
+ * Process a file or directory.
  * The checksum values are set in extended attributes.
  * @param ctx       The parec context.
  * @param filename  The file name.
  * @return 0 when successful and -1 in case of an error.
  */
-int parec_file(parec_ctx *ctx, const char *filename);
-
-/**
- * Process a directory.
- * The checksum values are set in the extended attributes.
- * @param ctx       The parex context.
- * @param dirname   The directory name.
- * @return 0 when successful and -1 in case of an error.
- */
-int parec_directory(parec_ctx *ctx, const char *dirname);
+int parec_process(parec_ctx *ctx, const char *filename);
 
 #ifdef __cplusplus
 }

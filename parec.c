@@ -19,6 +19,7 @@
 #include <openssl/evp.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <dirent.h>
 #include <sys/xattr.h>
 #include <unistd.h>
 
@@ -44,6 +45,7 @@ struct _parec_ctx {
 /* Buffer length for file operations. */
 static const unsigned int BUFLEN = 1024 * 1024;
 static const unsigned int ERRLEN = 300;
+static const unsigned int PATHLEN = 1024;
 static const unsigned int XATTR_NAME_LEN = 230; // with overhead for 'user.' and alg.name
 static const char DEFAULT_XATTR_PREFIX[] = "user.";
 static const char MTIME_XATTR_NAME[] = "mtime";
@@ -399,9 +401,133 @@ static int _parec_purge(parec_ctx *ctx, const char *name)
     return 0;
 }
 
-int parec_file(parec_ctx *ctx, const char *filename) {
-    int a,n,rc;
+static int _parec_file(parec_ctx *ctx, const char *filename, EVP_MD_CTX *md_ctx) {
+    int a,n;
     unsigned char buffer[BUFLEN];
+
+    // processing the file by blocks
+    FILE *f = fopen(filename, "rb");
+    if(!f) {
+        PAREC_ERROR(ctx, "parec: could not open file '%s'", filename);
+        return -1;
+    }
+    while (feof(f) == 0) {
+        n = fread(buffer, sizeof (unsigned char), BUFLEN, f);
+        if (n > 0) {
+            // processing one block
+            for (a = 0; a < ctx->algorithms; a++) {
+                if(EVP_DigestUpdate(&md_ctx[a], buffer, n) != 1) {
+                    PAREC_ERROR(ctx, "parec: calculating digest '%s' has failed", ctx->algorithm[a]);
+                    return -1;
+                }
+            }
+        }
+    }
+    // we already have the final block, so the file can be closed
+    fclose(f);
+
+    return 0;
+}
+
+// The directory checksum is the checksum of the entry checksums.
+// To be independent of the order or name of the entries, the 
+// checksums of the entries has to be ordered by the checksums
+// themselves.
+//
+// There are a number of possibilities:
+// 1. double scan
+//      process each entry and count them
+//      allocate checksum arrays
+//      fetch the checksums from the extended attributes
+//      sort the arrays
+//      calculate the directory checksum based on the arrays
+// 
+// 2. dynamic allocation
+//      merge the above two loops into a single loop by dynamically
+//      reallocating the checksum arrays, if they are not big enough
+// 
+// 3. dynamic heap
+//      merge the sort step into the loop by maintaining a sorted structure
+//
+// 2.a returning checksums
+//      instead of passing attributes through extended attributes
+//      the processing function could return them to the calling
+//      context directly
+
+static int _parec_directory(parec_ctx *ctx, const char *dirname, EVP_MD_CTX *md_ctx) {
+    int dcount = 0;
+    struct dirent *p_dirent;
+    char full_name[PATHLEN], full_dirname[PATHLEN];
+    unsigned char x_digest[EVP_MAX_MD_SIZE];
+    int x_dlen, max_name_len, a;
+
+    DIR *d = opendir(dirname);
+    if(!d) {
+        PAREC_ERROR(ctx, "parec: could not open directory '%s'", dirname);
+        return -1;
+    }
+
+    // pre-calculating the directory name
+    strncpy(full_dirname, dirname, PATHLEN);
+    max_name_len = strlen(full_dirname);
+    if (max_name_len == PATHLEN) {
+        PAREC_ERROR(ctx, "parec: too long name '%s'", dirname);
+        return -1;
+    }
+    // make sure there is a slash at the end
+    if (full_dirname[max_name_len] != '/') {
+        max_name_len++;
+        full_dirname[max_name_len - 1] = '/';
+        full_dirname[max_name_len] = '\0';
+    }
+    max_name_len = PATHLEN - max_name_len;
+    parec_log4c_DEBUG("full_dirname = %s", full_dirname);
+
+    while ((p_dirent = readdir(d)) != NULL) {
+        // skip '.' and '..'
+        if ((p_dirent->d_name[0] == '.') 
+            && (p_dirent->d_name[1] == '\0' 
+                || (p_dirent->d_name[1] == '.' && p_dirent->d_name[2] == '\0')))
+            continue;
+        // TODO: some filtering
+        strncpy(full_name, full_dirname, PATHLEN);
+        strncat(full_name, p_dirent->d_name, max_name_len); 
+        parec_log4c_DEBUG("processing '%s' for directory '%s'", full_name, dirname);
+        if (parec_process(ctx, full_name)) return -1;
+        dcount++;
+    }
+
+    rewinddir(d);
+
+    while ((p_dirent = readdir(d)) != NULL) {
+        // skip '.' and '..'
+        if ((p_dirent->d_name[0] == '.') 
+            && (p_dirent->d_name[1] == '\0' 
+                || (p_dirent->d_name[1] == '.' && p_dirent->d_name[2] == '\0')))
+            continue;
+        // TODO: some filtering
+        strncpy(full_name, full_dirname, PATHLEN);
+        strncat(full_name, p_dirent->d_name, max_name_len); 
+        parec_log4c_DEBUG("full_name = %s", full_name);
+        for (a = 0; a < ctx->algorithms; a++) {
+            if((x_dlen = getxattr(full_name, ctx->xattr_algorithm[a], &x_digest, EVP_MAX_MD_SIZE)) < 0 && (errno != ENODATA)) {
+                PAREC_ERROR(ctx, "parec: fetching attribute %s has failed on %s with '%s(%d)'.\n", ctx->xattr_algorithm[a], full_name, strerror(errno), errno);
+                return -1;
+            }
+            if(EVP_DigestUpdate(&md_ctx[a], x_digest, x_dlen) != 1) {
+                PAREC_ERROR(ctx, "parec: calculating digest '%s' has failed", ctx->algorithm[a]);
+                return -1;
+            }
+        }
+    }
+
+    closedir(d);
+
+    return 0;
+}
+
+int parec_process(parec_ctx *ctx, const char *name) {
+    int a,rc;
     EVP_MD_CTX *md_ctx;
     unsigned char digest[EVP_MAX_MD_SIZE], x_digest[EVP_MAX_MD_SIZE];
     unsigned int dlen;
@@ -411,20 +537,20 @@ int parec_file(parec_ctx *ctx, const char *filename) {
     PAREC_CHECK_CONTEXT(ctx)
 
     if (ctx->method == PAREC_METHOD_PURGE) {
-        return _parec_purge(ctx, filename);
+        return _parec_purge(ctx, name);
     }
 
     if (ctx->method == PAREC_METHOD_FORCE) {
-        if(_parec_purge(ctx, filename)) {
+        if(_parec_purge(ctx, name)) {
             return -1;
         }
     }
 
-    parec_log4c_DEBUG("Processing file '%s'", filename);
+    parec_log4c_DEBUG("Processing '%s'", name);
 
     // checking the modification time at the beginning
-    if((rc = stat(filename, &p_stat))) {
-        PAREC_ERROR(ctx, "parec: could not stat %s (%d)", filename, rc);
+    if((rc = stat(name, &p_stat))) {
+        PAREC_ERROR(ctx, "parec: could not stat %s (%d)", name, rc);
         return -1;
     }
     start_mtime = p_stat.st_mtime;
@@ -432,14 +558,14 @@ int parec_file(parec_ctx *ctx, const char *filename) {
     // trying to check, if the file was modified since the last calculation,
     // and skip the rest, if it was not modified
     if (ctx->method != PAREC_METHOD_CHECK) {
-        if((rc = getxattr(filename, ctx->xattr_mtime, &x_mtime, sizeof(x_mtime))) < 0 && (errno != ENODATA)) {
-            PAREC_ERROR(ctx, "parec: fetching attribute %s has failed on %s with '%s(%d)'.\n", ctx->xattr_mtime, filename, strerror(errno), errno);
+        if((rc = getxattr(name, ctx->xattr_mtime, &x_mtime, sizeof(x_mtime))) < 0 && (errno != ENODATA)) {
+            PAREC_ERROR(ctx, "parec: fetching attribute %s has failed on %s with '%s(%d)'.\n", ctx->xattr_mtime, name, strerror(errno), errno);
             return -1;
         }
         else if (rc == sizeof(x_mtime)) {
             parec_log4c_DEBUG("comparing actual (%d) and stored (%d) mtime", start_mtime, x_mtime);
             if (start_mtime == x_mtime) {
-                parec_log4c_INFO("checksums are already calculated, skipping '%s'", filename);
+                parec_log4c_INFO("checksums are already calculated, skipping '%s'", name);
                 return 0;
             }
         }
@@ -454,39 +580,37 @@ int parec_file(parec_ctx *ctx, const char *filename) {
         return -1;
     }
 
+    for (a = 0; a < ctx->algorithms; a++) {
+        if(EVP_DigestInit(&md_ctx[a], ctx->evp_algorithm[a]) != 1) {
+            PAREC_ERROR(ctx, "parec: initializing digest '%s' has failed", ctx->algorithm[a]);
+            return -1;
+        }
+    }
 
-    FILE *f = fopen(filename, "rb");
-    if(!f) {
-        PAREC_ERROR(ctx, "parec: could not open file '%s'", filename);
+    // the processing function can assume that the entry has not been changed,
+    // while processing, otherwise it is going to be detected by the calling
+    // context
+    if (S_ISREG(p_stat.st_mode)) {
+        if(_parec_file(ctx, name, md_ctx)) return -1;
+    }
+    else if (S_ISDIR(p_stat.st_mode)) {
+        if(_parec_directory(ctx, name, md_ctx)) return -1;
+    }
+    else {
+        PAREC_ERROR(ctx, "parec: unknown entry type of '%s'", name);
         return -1;
     }
 
-    // processing the file by blocks
-    for (a = 0; a < ctx->algorithms; a++) {
-        EVP_DigestInit(&md_ctx[a], ctx->evp_algorithm[a]);
-    }
-    while (feof(f) == 0) {
-        n = fread(buffer, sizeof (unsigned char), BUFLEN, f);
-        if (n > 0) {
-            // processing one block
-            for (a = 0; a < ctx->algorithms; a++) {
-                EVP_DigestUpdate(&md_ctx[a], buffer, n);
-            }
-        }
-    }
-    // we already have the final block, so the file can be closed
-    fclose(f);
-
     // checking the modification time at the end
-    if((rc = stat(filename, &p_stat))) {
-        PAREC_ERROR(ctx, "parec: could not stat %s (%d)", filename, rc);
+    if((rc = stat(name, &p_stat))) {
+        PAREC_ERROR(ctx, "parec: could not stat %s (%d)", name, rc);
         return -1;
     }
     end_mtime = p_stat.st_mtime;
 
     if(start_mtime != end_mtime) {
-        _parec_purge(ctx, filename);
-        PAREC_ERROR(ctx, "parec: file %s has been modified while processing", filename);
+        _parec_purge(ctx, name);
+        PAREC_ERROR(ctx, "parec: file %s has been modified while processing", name);
         return -1;
     }
 
@@ -494,21 +618,24 @@ int parec_file(parec_ctx *ctx, const char *filename) {
     //      storing it in an extended attribute or
     //      comparing it with a previous value
     for (a = 0; a < ctx->algorithms; a++) {
-        EVP_DigestFinal (&md_ctx[a], digest, &dlen);
+        if(EVP_DigestFinal (&md_ctx[a], digest, &dlen) != 1) {
+            PAREC_ERROR(ctx, "parec: finalizing digest '%s' has failed", ctx->algorithm[a]);
+            return -1;
+        }
         if (ctx->method != PAREC_METHOD_CHECK) {
             parec_log4c_DEBUG("Storing xattr(%s)", ctx->xattr_algorithm[a]);
-            if((rc = setxattr(filename, ctx->xattr_algorithm[a], digest, dlen, 0))) {
-                PAREC_ERROR(ctx, "parec: setting attribute %s has failed on %s with '%s(%d)'.\n", ctx->xattr_algorithm[a], filename, strerror(errno), errno);
+            if((rc = setxattr(name, ctx->xattr_algorithm[a], digest, dlen, 0))) {
+                PAREC_ERROR(ctx, "parec: setting attribute %s has failed on %s with '%s(%d)'.\n", ctx->xattr_algorithm[a], name, strerror(errno), errno);
                 return -1;
             }
         }
         else {
             parec_log4c_DEBUG("Comparing xattr(%s)", ctx->xattr_algorithm[a]);
-            if((rc = getxattr(filename, ctx->xattr_algorithm[a], &x_digest, EVP_MAX_MD_SIZE)) < 0 && (errno != ENODATA)) {
-                PAREC_ERROR(ctx, "parec: fetching attribute %s has failed on %s with '%s(%d)'.\n", ctx->xattr_algorithm[a], filename, strerror(errno), errno);
+            if((rc = getxattr(name, ctx->xattr_algorithm[a], &x_digest, EVP_MAX_MD_SIZE)) < 0 && (errno != ENODATA)) {
+                PAREC_ERROR(ctx, "parec: fetching attribute %s has failed on %s with '%s(%d)'.\n", ctx->xattr_algorithm[a], name, strerror(errno), errno);
                 return -1;
             }
-            else if ((rc != dlen) || memcmp(digest, x_digest, dlen)) {
+            else if ((rc != (int)dlen) || memcmp(digest, x_digest, dlen)) {
                 PAREC_ERROR(ctx, "parec: checksums (%s) do not match", ctx->algorithm[a]);
                 return -1;
             }
@@ -521,30 +648,15 @@ int parec_file(parec_ctx *ctx, const char *filename) {
     // storing the mtime, that we know of unchanged during processing
     if (x_mtime == 0 || ctx->method == PAREC_METHOD_FORCE) {
         parec_log4c_DEBUG("Storing xattr(%s)", ctx->xattr_mtime);
-        if((rc = setxattr(filename, ctx->xattr_mtime, &start_mtime, sizeof(start_mtime), 0))) {
-            PAREC_ERROR(ctx, "parec: setting attribute %s has failed on %s with '%s(%d)'.\n", ctx->xattr_mtime, filename, strerror(errno), errno);
+        if((rc = setxattr(name, ctx->xattr_mtime, &start_mtime, sizeof(start_mtime), 0))) {
+            PAREC_ERROR(ctx, "parec: setting attribute %s has failed on %s with '%s(%d)'.\n", ctx->xattr_mtime, name, strerror(errno), errno);
             return -1;
         }
     }
 
 
     free(md_ctx);
-    parec_log4c_DEBUG("Finished file '%s'", filename);
-    return 0;
-}
-
-
-int parec_directory(parec_ctx *ctx, const char *dirname) {
-    int rc;
-
-    PAREC_CHECK_CONTEXT(ctx)
-
-    if (ctx->method == PAREC_METHOD_PURGE) {
-        return _parec_purge(ctx, dirname);
-    }
-
-    if((rc = parec_init_evp(ctx))) return rc;
-
+    parec_log4c_DEBUG("Finished '%s'", name);
     return 0;
 }
 

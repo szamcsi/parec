@@ -120,7 +120,7 @@ int main(int argc, char *argv[]) {
     }
 
     for (int i = 0; i < argc; i++) {
-        if(parec_file(ctx, argv[i])) {
+        if(parec_process(ctx, argv[i])) {
             fprintf(stderr, "ERROR: %s\n", parec_get_error(ctx));
             return 1;
         }
