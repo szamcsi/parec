@@ -15,6 +15,7 @@
 #include <stdarg.h>
 #define _GNU_SOURCE
 #include <string.h>
+#include <stdlib.h>
 #include <errno.h>
 #include <openssl/evp.h>
 #include <sys/types.h>
@@ -67,6 +68,13 @@ static void _parec_set_error(parec_ctx *ctx, char *fmt, ...)
 
 #define PAREC_CHECK_CONTEXT(ctx)    if(!ctx) { parec_log4c_ERROR("Context is not initialized"); return -1; }
 
+static const char *_parec_hex(char *hex, const unsigned char *digest, int len) {
+    for (int i = 0; i < len; i++) {
+        sprintf(hex + i * 2, "%02x", digest[i]);
+    }
+    hex[len * 2 + 1] = '\0';
+    return hex;
+}
 
 const char *parec_get_error(parec_ctx *ctx)
 {
@@ -429,6 +437,19 @@ static int _parec_file(parec_ctx *ctx, const char *filename, EVP_MD_CTX *md_ctx)
     return 0;
 }
 
+// filterint the directory entries
+static int _parec_filter(parec_ctx *ctx, const char *dname) 
+{
+    // skip '.' and '..'
+    if ((dname[0] == '.') 
+        && (dname[1] == '\0' 
+            || (dname[1] == '.' && dname[2] == '\0')))
+        return -1;
+    // TODO: some more filtering
+    return 0;
+}
+
+
 // The directory checksum is the checksum of the entry checksums.
 // To be independent of the order or name of the entries, the 
 // checksums of the entries has to be ordered by the checksums
@@ -457,9 +478,10 @@ static int _parec_file(parec_ctx *ctx, const char *filename, EVP_MD_CTX *md_ctx)
 static int _parec_directory(parec_ctx *ctx, const char *dirname, EVP_MD_CTX *md_ctx) {
     int dcount = 0;
     struct dirent *p_dirent;
-    char full_name[PATHLEN], full_dirname[PATHLEN];
-    unsigned char x_digest[EVP_MAX_MD_SIZE];
-    int x_dlen, max_name_len, a;
+    char full_name[PATHLEN], full_dirname[PATHLEN], hex[EVP_MAX_MD_SIZE*2+1];
+    unsigned char **x_digest, x_digest_tmp[EVP_MAX_MD_SIZE];
+    int *x_dlen, x_dlen_tmp, a;
+    unsigned int max_name_len;
 
     DIR *d = opendir(dirname);
     if(!d) {
@@ -475,7 +497,7 @@ static int _parec_directory(parec_ctx *ctx, const char *dirname, EVP_MD_CTX *md_
         return -1;
     }
     // make sure there is a slash at the end
-    if (full_dirname[max_name_len] != '/') {
+    if (full_dirname[max_name_len - 1] != '/') {
         max_name_len++;
         full_dirname[max_name_len - 1] = '/';
         full_dirname[max_name_len] = '\0';
@@ -483,45 +505,84 @@ static int _parec_directory(parec_ctx *ctx, const char *dirname, EVP_MD_CTX *md_
     max_name_len = PATHLEN - max_name_len;
     parec_log4c_DEBUG("full_dirname = %s", full_dirname);
 
+    // the array to hold the pointer to the array of digests
+    x_digest = calloc(sizeof(*(x_digest)), ctx->algorithms);
+    if(!x_digest) {
+        PAREC_ERROR(ctx, "parec: out of memory");
+        return -1;
+    }
+    // the array to hold the digest lengths
+    x_dlen = calloc(sizeof(*(x_dlen)), ctx->algorithms);
+    if(!x_dlen) {
+        PAREC_ERROR(ctx, "parec: out of memory");
+        return -1;
+    }
+
     while ((p_dirent = readdir(d)) != NULL) {
-        // skip '.' and '..'
-        if ((p_dirent->d_name[0] == '.') 
-            && (p_dirent->d_name[1] == '\0' 
-                || (p_dirent->d_name[1] == '.' && p_dirent->d_name[2] == '\0')))
-            continue;
-        // TODO: some filtering
+        if (_parec_filter(ctx, p_dirent->d_name)) continue;
         strncpy(full_name, full_dirname, PATHLEN);
         strncat(full_name, p_dirent->d_name, max_name_len); 
-        parec_log4c_DEBUG("processing '%s' for directory '%s'", full_name, dirname);
+        parec_log4c_DEBUG("1. processing '%s' for directory '%s'", full_name, dirname);
         if (parec_process(ctx, full_name)) return -1;
         dcount++;
     }
+    parec_log4c_DEBUG("# processed entries: %d", dcount);
 
     rewinddir(d);
 
-    while ((p_dirent = readdir(d)) != NULL) {
-        // skip '.' and '..'
-        if ((p_dirent->d_name[0] == '.') 
-            && (p_dirent->d_name[1] == '\0' 
-                || (p_dirent->d_name[1] == '.' && p_dirent->d_name[2] == '\0')))
-            continue;
-        // TODO: some filtering
+    int i = 0;
+    while ((p_dirent = readdir(d)) != NULL && (i <= dcount)) {
+        if (_parec_filter(ctx, p_dirent->d_name)) continue;
         strncpy(full_name, full_dirname, PATHLEN);
         strncat(full_name, p_dirent->d_name, max_name_len); 
-        parec_log4c_DEBUG("full_name = %s", full_name);
+        parec_log4c_DEBUG("2. processing '%s' for directory '%s'", full_name, dirname);
         for (a = 0; a < ctx->algorithms; a++) {
-            if((x_dlen = getxattr(full_name, ctx->xattr_algorithm[a], &x_digest, EVP_MAX_MD_SIZE)) < 0 && (errno != ENODATA)) {
+            // we have to allocate an array for the digests at the first time
+            // we know the exact size of one digest of a particular algorithm
+            if (!x_dlen[a]) {
+                if((x_dlen[a] = getxattr(full_name, ctx->xattr_algorithm[a], &x_digest_tmp, EVP_MAX_MD_SIZE)) < 0 && (errno != ENODATA)) {
+                    PAREC_ERROR(ctx, "parec: fetching attribute %s has failed on %s with '%s(%d)'.\n", ctx->xattr_algorithm[a], full_name, strerror(errno), errno);
+                }
+                // allocating the array of (dcount * (x_dlen[a] + 1))
+                x_digest[a] = calloc(sizeof(**(x_digest)), (x_dlen[a] + 1) * dcount);
+                if(!x_digest[a]) {
+                    PAREC_ERROR(ctx, "parec: out of memory");
+                    return -1;
+                }
+            }
+            // normal case
+            if((x_dlen_tmp = getxattr(full_name, ctx->xattr_algorithm[a], x_digest[a] + i * (x_dlen[a] + 1), EVP_MAX_MD_SIZE)) < 0 && (errno != ENODATA)) {
                 PAREC_ERROR(ctx, "parec: fetching attribute %s has failed on %s with '%s(%d)'.\n", ctx->xattr_algorithm[a], full_name, strerror(errno), errno);
                 return -1;
             }
-            if(EVP_DigestUpdate(&md_ctx[a], x_digest, x_dlen) != 1) {
+            if (x_dlen_tmp != x_dlen[a]) {
+                PAREC_ERROR(ctx, "parec: fetched an ivalid size (%d) digest entry from file '%s' (expected: %d for %s)", x_dlen_tmp, full_name, x_dlen[a], ctx->xattr_algorithm[a]);
+                return -1;
+            }
+            parec_log4c_DEBUG("%s(%d:%s) = 0x%s", ctx->xattr_algorithm[a], i, full_name, _parec_hex(hex, x_digest[a] + i * (x_dlen[a] + 1), x_dlen[a]));
+        }
+        i++;
+    }
+
+    if (closedir(d)) {
+        PAREC_ERROR(ctx, "parec: failed to close directory '%s' with '%s(%d)'.\n", dirname, strerror(errno), errno);
+        return -1;
+    }
+
+    // sorting the checksums and calculating the digests
+    for (a = 0; a < ctx->algorithms; a++) {
+        qsort(x_digest[a], dcount, x_dlen[a] + 1, (__compar_fn_t)strcmp);
+        for (int i = 0; i < dcount; i++) {
+            if(EVP_DigestUpdate(&md_ctx[a], x_digest[a] + i * (x_dlen[a] + 1), x_dlen[a]) != 1) {
                 PAREC_ERROR(ctx, "parec: calculating digest '%s' has failed", ctx->algorithm[a]);
                 return -1;
             }
+            parec_log4c_DEBUG("%s(%d) = 0x%s", ctx->xattr_algorithm[a], i, _parec_hex(hex, x_digest[a] + i * (x_dlen[a] + 1), x_dlen[a]));
         }
+        free(x_digest[a]);
     }
-
-    closedir(d);
+    free(x_digest);
+    free(x_dlen);
 
     return 0;
 }
