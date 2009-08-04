@@ -55,7 +55,7 @@ int main(int argc, char *argv[]) {
     else
         prog_name++;
 
-    if(!(ctx = parec_new())) {
+    if (!(ctx = parec_new())) {
         fprintf(stderr, "ERROR: Could not initialize the library.\n");
         return 1;
     }
@@ -69,32 +69,32 @@ int main(int argc, char *argv[]) {
                 verbose_flag++;
                 break;
             case 'a':
-                if(parec_add_checksum(ctx, optarg)) {
+                if (parec_add_checksum(ctx, optarg)) {
                     fprintf(stderr, "ERROR: %s\n", parec_get_error(ctx));
                     return 1;
                 }
                 default_checksums_flag = 0;
                 break;
             case 'p':
-                if(parec_set_xattr_prefix(ctx, optarg)) {
+                if (parec_set_xattr_prefix(ctx, optarg)) {
                     fprintf(stderr, "ERROR: %s\n", parec_get_error(ctx));
                     return 1;
                 }
                 break;
             case 'c':
-                if(parec_set_method(ctx, PAREC_METHOD_CHECK)) {
+                if (parec_set_method(ctx, PAREC_METHOD_CHECK)) {
                     fprintf(stderr, "ERROR: %s\n", parec_get_error(ctx));
                     return 1;
                 }
                 break;
             case 'f':
-                if(parec_set_method(ctx, PAREC_METHOD_FORCE)) {
+                if (parec_set_method(ctx, PAREC_METHOD_FORCE)) {
                     fprintf(stderr, "ERROR: %s\n", parec_get_error(ctx));
                     return 1;
                 }
                 break;
             case 'w':
-                if(parec_set_method(ctx, PAREC_METHOD_PURGE)) {
+                if (parec_set_method(ctx, PAREC_METHOD_PURGE)) {
                     fprintf(stderr, "ERROR: %s\n", parec_get_error(ctx));
                     return 1;
                 }
@@ -112,15 +112,15 @@ int main(int argc, char *argv[]) {
     argv += optind;
     
     // add the defaults, if nothing else was specified
-    if(default_checksums_flag) {
-        if(parec_add_checksum(ctx, "md5") || parec_add_checksum(ctx, "sha1")) {
+    if (default_checksums_flag) {
+        if (parec_add_checksum(ctx, "md5") || parec_add_checksum(ctx, "sha1")) {
             fprintf(stderr, "ERROR: %s\n", parec_get_error(ctx));
             return 1;
         }
     }
 
     for (int i = 0; i < argc; i++) {
-        if(parec_process(ctx, argv[i])) {
+        if (parec_process(ctx, argv[i])) {
             fprintf(stderr, "ERROR: %s\n", parec_get_error(ctx));
             return 1;
         }
@@ -130,12 +130,12 @@ int main(int argc, char *argv[]) {
             for (int a = 0; a < parec_get_checksum_count(ctx); a++) {
                 const char *x_name = parec_get_xattr_name(ctx, a);
                 const char *a_name = parec_get_checksum_name(ctx, a);
-                if((x_len = getxattr(argv[i], x_name, x_value, 255)) < 0) {
+                if ((x_len = getxattr(argv[i], x_name, x_value, 255)) < 0) {
                     fprintf(stderr, "Getting attribute %s has failed on %s\n", x_name, argv[i]);
                     return 1;
                 }
                 printf("%s(%s) = ", a_name, argv[i]);
-                for(int d = 0; d < x_len; d++) {
+                for (int d = 0; d < x_len; d++) {
                     printf("%02x", x_value[d]);
                 }
                 printf("\n");
