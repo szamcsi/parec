@@ -23,6 +23,7 @@
 #include <dirent.h>
 #include <sys/xattr.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #include <parec.h>
 #include <parec_log4c.h>
@@ -411,7 +412,13 @@ static int _parec_purge(parec_ctx *ctx, const char *name)
 
 static int _parec_file(parec_ctx *ctx, const char *filename, EVP_MD_CTX *md_ctx) {
     int a,n;
-    unsigned char buffer[BUFLEN];
+    unsigned char *buffer;
+
+    buffer = malloc(sizeof(*(buffer)) * BUFLEN);
+    if (!buffer) {
+        PAREC_ERROR(ctx, "parec: out of memory");
+        return -1;
+    }
 
     // processing the file by blocks
     FILE *f = fopen(filename, "rb");
@@ -419,6 +426,12 @@ static int _parec_file(parec_ctx *ctx, const char *filename, EVP_MD_CTX *md_ctx)
         PAREC_ERROR(ctx, "parec: could not open file '%s'", filename);
         return -1;
     }
+
+    // giving some hints to the kernel about our usage pattern
+    if (posix_fadvise(fileno(f), 0, 0, POSIX_FADV_SEQUENTIAL | POSIX_FADV_DONTNEED)) {
+        PAREC_ERROR(ctx, "parec: could not advise the kernel on buffer usage: %s(%d)", strerror(errno), errno);
+    }
+
     while (feof(f) == 0) {
         n = fread(buffer, sizeof (unsigned char), BUFLEN, f);
         if (n > 0) {
@@ -433,6 +446,8 @@ static int _parec_file(parec_ctx *ctx, const char *filename, EVP_MD_CTX *md_ctx)
     }
     // we already have the final block, so the file can be closed
     fclose(f);
+
+    free (buffer);
 
     return 0;
 }
