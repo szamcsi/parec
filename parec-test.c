@@ -1,8 +1,8 @@
 /*
- * Copyright (c) Akos FROHNER <akos@frohner.hu> 2009.
- * Licence: Apache2, GPLv2
- *
  * Testing the parec context structure without the functionality.
+ * 
+ * Copyright (c) Akos FROHNER <akos@frohner.hu> 2009.
+ * License: LGPLv2.1
  */
 
 #include <stdio.h>

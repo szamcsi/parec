@@ -1,9 +1,8 @@
 /**
- * Copyright (c) Akos FROHNER <akos@frohner.hu> 2009.
- * Licence: Apache2, GPLv2
- *
  * log4c -- simple logging library for C
  *
+ * Copyright (c) Akos FROHNER <akos@frohner.hu> 2009.
+ * License: LGPLv2.1
  */
 
 #ifndef _PAREC_LOG4C_H

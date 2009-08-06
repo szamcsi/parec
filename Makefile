@@ -1,3 +1,8 @@
+#
+# Makefile for 'parec'
+#
+# Copyright (c) Akos FROHNER <akos@frohner.hu> 2009.
+# License: LGPLv2.1
 
 include VERSION
 

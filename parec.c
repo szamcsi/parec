@@ -7,9 +7,8 @@
  * Checksum of the files is based on their content.
  * Checksum of directories is based on the checksum of the files they contain.
  *
- * Copyright, 2009.
- *   Akos FROHNER <akos@frohner.hu>
- * Licence: Apache2, GPLv2
+ * Copyright (c) Akos FROHNER <akos@frohner.hu> 2009.
+ * License: LGPLv2.1
  */
 
 #include <stdarg.h>
@@ -24,6 +23,7 @@
 #include <sys/xattr.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <fnmatch.h>
 
 #include <parec.h>
 #include <parec_log4c.h>
@@ -460,7 +460,11 @@ static int _parec_filter(parec_ctx *ctx, const char *dname)
         && (dname[1] == '\0' 
             || (dname[1] == '.' && dname[2] == '\0')))
         return -1;
-    // TODO: some more filtering
+    for (int e = 0; e < ctx->excludes; e++) {
+        if (fnmatch(ctx->exclude[e], dname, 0)) {
+        }
+
+    }
     return 0;
 }
 

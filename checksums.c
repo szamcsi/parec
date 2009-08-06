@@ -7,9 +7,8 @@
  * Checksum of the files is based on their content.
  * Checksum of directories is based on the checksum of the files they contain.
  *
- * Copyright, 2009.
- *   Akos FROHNER <akos@frohner.hu>
- * Licence: Apache2, GPLv2
+ * Copyright (c) Akos FROHNER <akos@frohner.hu> 2009.
+ * License: GPLv2
  */
 
 #include <stdio.h>
