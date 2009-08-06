@@ -117,6 +117,22 @@ int parec_set_xattr_prefix(parec_ctx *ctx, const char *prefix);
 int parec_add_exclude_pattern(parec_ctx *ctx, const char *pattern);
 
 /**
+ * Get the number of exclude patterns in the context.
+ * @param ctx   The parec context.
+ * @return the number of exclude patterns and -1 in case of an error.
+ */
+int parec_get_exclude_count(parec_ctx *ctx);
+
+/**
+ * Get the given exclude pattern.
+ * @param ctx   The parec context.
+ * @param idx   The index of the exclude pattern.
+ * @return the exclude pattern and NULL in case of an error.
+ * The caller should not deallocate the returned string.
+ */
+const char *parec_get_exclude_pattern(parec_ctx *ctx, int idx);
+
+/**
  * Returns the error message for the last failed operation.
  * The returned pointer is valid only until the next call
  * to any of the library's functions with the same context.

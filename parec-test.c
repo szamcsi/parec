@@ -76,6 +76,27 @@ int main(int argc __attribute__((__unused__)), char *argv[] __attribute__((__unu
     TEST_PRINT("add_exclude_pattern(.git)")
     TEST_ZERO(parec_add_exclude_pattern(ctx, ".git"))
 
+    TEST_PRINT("get_exclude_count()")
+    if((c = parec_get_exclude_count(ctx)) < 0 || c != 2) {
+        printf("FAILED\n");
+        return -1;
+    }
+    printf("OK\n");
+
+    TEST_PRINT("get_exclude_pattern(0)")
+    if(!(s = parec_get_exclude_pattern(ctx, 0)) || strcmp(s, "*~")) {
+        printf("FAILED\n");
+        return -1;
+    }
+    printf("OK\n");
+
+    TEST_PRINT("get_exclude_pattern(1)")
+    if(!(s = parec_get_exclude_pattern(ctx, 1)) || strcmp(s, ".git")) {
+        printf("FAILED\n");
+        return -1;
+    }
+    printf("OK\n");
+
     TEST_PRINT("free")
     parec_free(ctx);
     printf("OK\n");

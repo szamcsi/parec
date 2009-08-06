@@ -22,6 +22,7 @@ static const char    *usage =
 "  -v, --verbose            Print checksums for each file.\n"
 "  -a, --algorithm ALG      Calculate checksums using ALG.\n"
 "  -p, --prefix XP          Prefix for the extended attributes.\n"
+"  -e, --exclude PTN        Exclude checking files matching PTN.\n"
 "  -c, --check              Check the already calculated checksums.\n"
 "  -f, --force              Force re-calculating the checksums.\n"
 "  -w, --wipe               Purge/wipe checksum attributes.\n";
@@ -32,6 +33,7 @@ static struct option long_options[] = {
     {"verbose",     no_argument,        NULL, 'v'},
     {"algorithm",   required_argument,  NULL, 'a'},
     {"prefix",      required_argument,  NULL, 'p'},
+    {"exclude",     required_argument,  NULL, 'e'},
     {"check",       no_argument,        NULL, 'c'},
     {"force",       no_argument,        NULL, 'f'},
     {"wipe",        no_argument,        NULL, 'w'},
@@ -76,6 +78,12 @@ int main(int argc, char *argv[]) {
                 break;
             case 'p':
                 if (parec_set_xattr_prefix(ctx, optarg)) {
+                    fprintf(stderr, "ERROR: %s\n", parec_get_error(ctx));
+                    return 1;
+                }
+                break;
+            case 'e':
+                if (parec_add_exclude_pattern(ctx, optarg)) {
                     fprintf(stderr, "ERROR: %s\n", parec_get_error(ctx));
                     return 1;
                 }

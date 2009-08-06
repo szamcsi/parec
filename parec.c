@@ -311,6 +311,26 @@ int parec_add_exclude_pattern(parec_ctx *ctx, const char *pattern)
     return 0;
 }
 
+int parec_get_exclude_count(parec_ctx *ctx)
+{
+    PAREC_CHECK_CONTEXT(ctx)
+
+    return ctx->excludes;
+}
+
+const char *parec_get_exclude_pattern(parec_ctx *ctx, int idx)
+{
+    if (!ctx)
+        return NULL;
+
+    if (idx < 0 || idx >= ctx->excludes) {
+        PAREC_ERROR(ctx, "parec: index %d is out of range [0,%d)", idx, ctx->excludes);
+        return NULL;
+    }
+
+    return ctx->exclude[idx];
+}
+
 int parec_set_xattr_prefix(parec_ctx *ctx, const char *prefix)
 {
     int x_len;
@@ -460,10 +480,15 @@ static int _parec_filter(parec_ctx *ctx, const char *dname)
         && (dname[1] == '\0' 
             || (dname[1] == '.' && dname[2] == '\0')))
         return -1;
-    for (int e = 0; e < ctx->excludes; e++) {
-        if (fnmatch(ctx->exclude[e], dname, 0)) {
-        }
 
+    // skip also the ones matching any of the glob patterns
+    for (int e = 0; e < ctx->excludes; e++) {
+        if (!fnmatch(ctx->exclude[e], dname, 0)) {
+            parec_log4c_DEBUG("skipping '%s' because of pattern '%s'", dname, ctx->exclude[e]);
+            return -1;
+        }
+        // note that fnmatch(3) may also return a non-zero value
+        // to indicate an error, however we just skip that here
     }
     return 0;
 }

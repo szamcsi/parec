@@ -152,6 +152,41 @@ if [ $dataset_sha1 != $dataset_sha1_1 ]; then
 fi
 echo "OK"
 
+echo -n "test 04: testing exclude patterns -- "
+touch dataset/file1~
+mkdir dataset/.garbage
+touch dataset/.garbage/file1g
+./checksums --force --exclude '*~' --exclude '.garbage' dataset
+# directory checksum should not have changed
+dataset_md5_1=$(getfattr --encoding=hex --name=user.md5 dataset | awk -F= '/^user.md5/ { print $2 }')
+if [ $dataset_md5 != $dataset_md5_1 ]; then
+    echo "MD5 checksum has changed"
+    exit 1
+fi
+dataset_sha1_1=$(getfattr --encoding=hex --name=user.sha1 dataset | awk -F= '/^user.sha1/ { print $2 }')
+if [ $dataset_sha1 != $dataset_sha1_1 ]; then
+    echo "MD5 checksum has changed"
+    exit 1
+fi
+echo "OK"
+
+echo -n "test 04: without exclude patterns it shall differ -- "
+./checksums --force dataset
+# directory checksum should not have changed
+dataset_md5_1=$(getfattr --encoding=hex --name=user.md5 dataset | awk -F= '/^user.md5/ { print $2 }')
+if [ $dataset_md5 = $dataset_md5_1 ]; then
+    echo "MD5 checksum has not changed"
+    exit 1
+fi
+dataset_sha1_1=$(getfattr --encoding=hex --name=user.sha1 dataset | awk -F= '/^user.sha1/ { print $2 }')
+if [ $dataset_sha1 = $dataset_sha1_1 ]; then
+    echo "MD5 checksum has not changed"
+    exit 1
+fi
+echo "OK"
+# re-calculating for further tests
+./checksums --force --exclude '*~' --exclude '.garbage' dataset
+
 #echo $dataset_md5
 #echo $dataset_md5_1
 #echo $dataset_sha1

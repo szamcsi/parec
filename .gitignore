@@ -1,2 +1,5 @@
 *.o
 *.so
+checksums
+parec-test
+dataset
