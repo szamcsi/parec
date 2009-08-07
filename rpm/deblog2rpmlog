@@ -1,0 +1,26 @@
+#!/usr/bin/perl -w
+
+use Parse::DebianChangelog;
+
+my $chlog = Parse::DebianChangelog->init({ infile => 'debian/changelog' });
+$chlog->parse();
+
+foreach my $entry ($chlog->data()) {
+    # RPM changelog entry header line:
+    # DAY MON DD YYYY Real Username <user@example.org> 1.2.3-4
+    # The date representation is different:
+    #   RedHat: Tue Apr  6 2007
+    #   Debian: Tue, 06 Apr 2007 HH:MM:SS +HHMM
+    my ($weekday, $monthday, $month, $year) = 
+        ($entry->Date() =~ /(\w\w\w), (\d\d) (\w\w\w) (\d\d\d\d)/);
+    $monthday =~ s/^0/ /;
+    print "* $weekday $month $monthday $year ", 
+        $entry->Maintainer(), " ", $entry->Version(), "\n\n";
+    foreach my $line (split(/\n/, $entry->Changes())) {
+        $line =~ s/^   //;
+        $line =~ s/^\*/-/;
+        print "$line\n";
+    }
+    print "\n";
+}
+

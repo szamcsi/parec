@@ -1,0 +1,39 @@
+PaReC -- Parallel Recursice Checksums
+
+Multiple Checksums
+------------------
+
+When copying or transferring large datasets you may want to make sure
+that the destination copy is identical to the source. The easiest way
+to achieve this is to compare their checksums.
+
+You may need to use different checksum algorithms in different contexts,
+so it is often useful to calculate all checksums at the source in advance.
+Calculating checksums is usually an I/O bound operation, so it is more
+efficient to read the file only once and calculate all checksums at the 
+same time and this is what provided by the 'parec' library.
+
+Directory Checksum
+------------------
+
+To simplify the comparison of larger datasets, which contain multiple
+files 'parec' also computes checksums for directories, which recursively
+produces a single checksum for the top-level directory. This checksum
+describes the whole dataset, so if any of its file changes, the top-level
+checksum would be different.
+
+To avoid uncertainties with the representation and ordering of file 
+names on different platforms and using different locals the directory
+checksum is entirely based on the ordered checksums of its content.
+In simple words, if you rename a file in a directory, the checksum 
+will not change.
+
+Interfaces
+----------
+
+The functionality is implemented as a C library under LGPLv2.1 that
+it could be easily reused by other applications. 
+
+There is also a command line utility for simple use cases.
+
+

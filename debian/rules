@@ -1,0 +1,67 @@
+#!/usr/bin/make -f
+#
+# Copyright (c) Akos FROHNER <akos@frohner.hu> 2009.
+# License: LGPLv2.1
+
+# Uncomment this to turn on verbose mode.
+# export DH_VERBOSE=1
+
+include VERSION
+BUILDDIR=$(CURDIR)/debian/build/$(PACKAGE)-$(VERSION)
+INSTALLDIR=$(CURDIR)/debian/$(PACKAGE)
+
+PREFIX=/usr
+
+SHELL := sh -e
+
+configure: configure-stamp
+configure-stamp:
+	dh_testdir
+	make tarball
+	touch configure-stamp
+
+build: build-stamp
+build-stamp: configure-stamp 
+	dh_testdir
+	mkdir -p debian/build
+	tar -C debian/build -xzf $(PACKAGE)-$(VERSION).tar.gz
+	$(MAKE) -C $(BUILDDIR)
+	touch $@
+
+clean:
+	dh_testdir
+	dh_testroot
+	rm -f build-stamp configure-stamp
+	rm -rf debian/build
+	dh_clean 
+
+install: install-stamp
+install-stamp: build-stamp
+	dh_testdir
+	dh_testroot
+	dh_clean -k 
+	$(MAKE) -C $(BUILDDIR) prefix=$(INSTALLDIR)/$(PREFIX) install
+	touch $@
+
+binary-indep:
+
+binary-arch: install
+	dh_testdir
+	dh_testroot
+	dh_installdocs
+	dh_install
+	dh_strip
+	#dh_installman
+	dh_compress
+	dh_fixperms
+	dh_makeshlibs 
+	dh_shlibdeps
+	#dh_pysupport
+	dh_installdeb
+	dh_gencontrol
+	dh_md5sums
+	dh_builddeb
+
+binary: binary-indep binary-arch
+.PHONY: build clean binary-indep binary-arch binary install configure
+
