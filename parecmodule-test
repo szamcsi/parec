@@ -1,0 +1,19 @@
+#!/usr/bin/python
+
+import parec
+
+myparec = parec.Parec()
+
+myparec.add_checksum('md5')
+myparec.add_checksum('sha1')
+print myparec.get_checksums()
+
+myparec.add_exclude_pattern('*~')
+myparec.add_exclude_pattern('.git')
+print myparec.get_exclude_patterns()
+
+myparec.set_xattr_prefix('local')
+
+myparec.set_method('default')
+#myparec.set_method('something')
+

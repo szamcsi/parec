@@ -11,8 +11,18 @@ IF_MINOR=$(shell echo $(INTERFACE_VERSION) | cut -d. -f 2)
 IF_PATCH=$(shell echo $(INTERFACE_VERSION) | cut -d. -f 3)
 
 BINS = checksums parec-test
-LIBS = libparec.so
+LIBS = libparec.so parecmodule.so
 CFLAGS = -g -std=c99 -I. -Wall -W -Wmissing-prototypes
+
+ifeq ($(prefix), $(EMPTY))
+prefix=/usr
+endif
+
+PYTHON_VERSION=$(shell python -c "import sys; print sys.version[:3]")
+PYTHON_PREFIX=$(shell python -c "import os; import sys; print os.path.normpath(sys.prefix)")
+PYTHON_INC=-I$(shell python -c "from distutils import sysconfig; print sysconfig.get_python_inc(0)")
+PYTHON_LIB=$(shell python -c "from distutils import sysconfig; print sysconfig.get_python_lib(0,1)")
+PYTHON_INSTALL=$(shell python -c "from distutils import sysconfig; print sysconfig.get_python_lib(0,0,prefix='$(prefix)')")
 
 default: $(BINS) $(LIBS)
 
@@ -27,6 +37,9 @@ help:
 
 parec_log4c.o: parec_log4c.c parec_log4c.h
 parec.o: parec.c parec.h parec_log4c.h
+
+parecmodule.so: parecmodule.c libparec.so
+	$(CC) -shared -o $@ $< -L . -lparec -L$(PYTHON_LIB) $(PYTHON_INC) -I$(CURDIR)
 
 libparec.so: parec.o parec_log4c.o
 	$(CC) -shared -o $@.$(INTERFACE_VERSION) -Xlinker -soname=$@.$(IF_MAJOR) $^ -lcrypto
@@ -46,10 +59,16 @@ install: $(BINS) $(LIBS)
 	install -m 0644 README $(prefix)/share/doc/$(PACKAGE)/
 	install -d -m 0755 $(prefix)/include
 	install -m 0644 parec.h parec_log4c.h $(prefix)/include/
+	install -d -m 0755 $(PYTHON_INSTALL)
+	install -m 0755 parecmodule.so $(PYTHON_INSTALL)/
 
 test: $(BINS)
 	LD_LIBRARY_PATH=$(CURDIR) ./parec-test
+	LD_LIBRARY_PATH=$(CURDIR) ./parecmodule-test
 	LD_LIBRARY_PATH=$(CURDIR) ./checksums-test
+
+pytest: parecmodule.so
+	LD_LIBRARY_PATH=$(CURDIR) ./parecmodule-test
 
 clean: 
 	rm -f $(BINS) $(LIBS) *.o *.so.*
