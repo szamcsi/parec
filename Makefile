@@ -12,7 +12,8 @@ IF_PATCH=$(shell echo $(INTERFACE_VERSION) | cut -d. -f 3)
 
 BINS = checksums parec-test
 LIBS = libparec.so parecmodule.so
-MANS = checksums.1
+MAN1 = checksums.1
+MAN3 = man3/parec.h.3 man3/parec_log4c.h.3
 CFLAGS = -g -std=c99 -I. -Wall -W -Wmissing-prototypes
 
 ifeq ($(prefix), $(EMPTY))
@@ -24,6 +25,11 @@ XSLTPROC=xsltproc
 endif
 XSLTPROCFLAGS = --nonet
 MAN_STYLESHEET = http://docbook.sourceforge.net/release/xsl/current/manpages/docbook.xsl
+
+ifeq ($(DOXYGEN), $(EMPTY))
+DOXYGEN=doxygen
+endif
+DOXYCONF = doxygen.conf
 
 PYTHON_VERSION=$(shell python -c "import sys; print sys.version[:3]")
 PYTHON_PREFIX=$(shell python -c "import os; import sys; print os.path.normpath(sys.prefix)")
@@ -54,15 +60,19 @@ libparec.so: parec.o parec_log4c.o
 	ln -sf $@.$(IF_MAJOR).$(IF_MINOR) $@.$(IF_MAJOR)
 	ln -sf $@.$(IF_MAJOR) $@
 
-doc: $(MANS)
+doc: $(MAN1) $(MAN3)
 
 version.xml:
 	echo "$(VERSION)" >version.xml
 
 %.1: %.1.xml version.xml
+	mkdir -p man1
 	$(XSLTPROC) $(XSLTPROCFLAGS) $(MAN_STYLESHEET) $<
 
-install: $(BINS) $(LIBS) $(MANS)
+man3/%.3: $(DOXYCONF) $(wildcard *.h)
+	$(DOXYGEN) $(DOXYCONF)
+
+install: $(BINS) $(LIBS) $(MAN1) $(MAN3)
 	install -d -m 0755 $(prefix)/lib
 	install -m 0755 libparec.so.$(INTERFACE_VERSION) $(prefix)/lib/
 	ln -sf libparec.so.$(INTERFACE_VERSION) $(prefix)/lib/libparec.so.$(IF_MAJOR).$(IF_MINOR)
@@ -74,8 +84,12 @@ install: $(BINS) $(LIBS) $(MANS)
 	install -m 0644 README $(prefix)/share/doc/$(PACKAGE)/
 	install -d -m 0755 $(prefix)/share/doc/$(PACKAGE)/examples
 	install -m 0644 parec-test.c parecmodule-test $(prefix)/share/doc/$(PACKAGE)/examples/
+	install -d -m 0755 $(prefix)/share/doc/$(PACKAGE)/html
+	install -m 0644 html/* $(prefix)/share/doc/$(PACKAGE)/html/
 	install -d -m 0755 $(prefix)/share/man/man1
-	install -m 0644 $(MANS) $(prefix)/share/man/man1/
+	install -m 0644 $(MAN1) $(prefix)/share/man/man1/
+	install -d -m 0755 $(prefix)/share/man/man3
+	install -m 0644 $(MAN3) $(prefix)/share/man/man3/
 	install -d -m 0755 $(prefix)/include
 	install -m 0644 parec.h parec_log4c.h $(prefix)/include/
 	install -d -m 0755 $(PYTHON_INSTALL)
@@ -88,7 +102,7 @@ test: $(BINS)
 
 clean: 
 	rm -f $(BINS) $(LIBS) *.o *.so.* version.xml *.1
-	rm -rf dataset pdataset
+	rm -rf dataset pdataset html man3
 
 distclean: clean
 	rm -f $(PACKAGE)-$(VERSION).tar.gz
@@ -96,7 +110,7 @@ distclean: clean
 tarball:
 	-rm -rf $(PACKAGE)-$(VERSION)
 	mkdir $(PACKAGE)-$(VERSION)
-	cp *.c *.h *.xml Makefile VERSION README checksums-test parecmodule-test $(PACKAGE)-$(VERSION)/
+	cp *.c *.h *.xml $(DOXYCONF) Makefile VERSION README checksums-test parecmodule-test $(PACKAGE)-$(VERSION)/
 	tar -czf $(PACKAGE)-$(VERSION).tar.gz $(PACKAGE)-$(VERSION)
 	rm -rf $(PACKAGE)-$(VERSION)
 

@@ -2,7 +2,7 @@ Source: parec
 Section: contrib/utils
 Priority: extra
 Maintainer: FROHNER Ákos <akos@frohner.hu>
-Build-Depends: debhelper (>= 5), libssl-dev, libc6-dev, attr, docbook-xml, docbook-xsl, python-dev (>= 2.3)
+Build-Depends: debhelper (>= 5), libssl-dev, libc6-dev, attr, docbook-xml, docbook-xsl, python-dev (>= 2.3), doxygen (>= 1.5)
 Standards-Version: 3.7.2
 
 Package: parec
