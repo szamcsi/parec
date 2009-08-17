@@ -2,12 +2,12 @@ Source: parec
 Section: contrib/utils
 Priority: extra
 Maintainer: FROHNER Ákos <akos@frohner.hu>
-Build-Depends: debhelper (>= 5), libssl-dev, libc6-dev, attr
+Build-Depends: debhelper (>= 5), libssl-dev, libc6-dev, attr, docbook-xml, docbook-xsl, python-dev (>= 2.3)
 Standards-Version: 3.7.2
 
 Package: parec
 Architecture: any
-Depends: ${shlibs:Depends}
+Depends: ${shlibs:Depends}, ${python:Depends}
 Description: Parallel Recursive Checksums
  This package contains a library and a simple executable
  to calculate multiple checksums of files and directories

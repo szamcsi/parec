@@ -12,11 +12,18 @@ IF_PATCH=$(shell echo $(INTERFACE_VERSION) | cut -d. -f 3)
 
 BINS = checksums parec-test
 LIBS = libparec.so parecmodule.so
+MANS = checksums.1
 CFLAGS = -g -std=c99 -I. -Wall -W -Wmissing-prototypes
 
 ifeq ($(prefix), $(EMPTY))
 prefix=/usr
 endif
+
+ifeq ($(XSLTPROC), $(EMPTY))
+XSLTPROC=xsltproc
+endif
+XSLTPROCFLAGS = --nonet
+MAN_STYLESHEET = http://docbook.sourceforge.net/release/xsl/current/manpages/docbook.xsl
 
 PYTHON_VERSION=$(shell python -c "import sys; print sys.version[:3]")
 PYTHON_PREFIX=$(shell python -c "import os; import sys; print os.path.normpath(sys.prefix)")
@@ -47,7 +54,15 @@ libparec.so: parec.o parec_log4c.o
 	ln -sf $@.$(IF_MAJOR).$(IF_MINOR) $@.$(IF_MAJOR)
 	ln -sf $@.$(IF_MAJOR) $@
 
-install: $(BINS) $(LIBS)
+doc: $(MANS)
+
+version.xml:
+	echo "$(VERSION)" >version.xml
+
+%.1: %.1.xml version.xml
+	$(XSLTPROC) $(XSLTPROCFLAGS) $(MAN_STYLESHEET) $<
+
+install: $(BINS) $(LIBS) $(MANS)
 	install -d -m 0755 $(prefix)/lib
 	install -m 0755 libparec.so.$(INTERFACE_VERSION) $(prefix)/lib/
 	ln -sf libparec.so.$(INTERFACE_VERSION) $(prefix)/lib/libparec.so.$(IF_MAJOR).$(IF_MINOR)
@@ -57,6 +72,10 @@ install: $(BINS) $(LIBS)
 	install -m 0755 checksums $(prefix)/bin/
 	install -d -m 0755 $(prefix)/share/doc/$(PACKAGE)
 	install -m 0644 README $(prefix)/share/doc/$(PACKAGE)/
+	install -d -m 0755 $(prefix)/share/doc/$(PACKAGE)/examples
+	install -m 0644 parec-test.c parecmodule-test $(prefix)/share/doc/$(PACKAGE)/examples/
+	install -d -m 0755 $(prefix)/share/man/man1
+	install -m 0644 $(MANS) $(prefix)/share/man/man1/
 	install -d -m 0755 $(prefix)/include
 	install -m 0644 parec.h parec_log4c.h $(prefix)/include/
 	install -d -m 0755 $(PYTHON_INSTALL)
@@ -68,7 +87,7 @@ test: $(BINS)
 	LD_LIBRARY_PATH=$(CURDIR) ./checksums-test
 
 clean: 
-	rm -f $(BINS) $(LIBS) *.o *.so.*
+	rm -f $(BINS) $(LIBS) *.o *.so.* version.xml *.1
 	rm -rf dataset pdataset
 
 distclean: clean
@@ -77,7 +96,7 @@ distclean: clean
 tarball:
 	-rm -rf $(PACKAGE)-$(VERSION)
 	mkdir $(PACKAGE)-$(VERSION)
-	cp *.c *.h Makefile VERSION README checksums-test $(PACKAGE)-$(VERSION)/
+	cp *.c *.h *.xml Makefile VERSION README checksums-test parecmodule-test $(PACKAGE)-$(VERSION)/
 	tar -czf $(PACKAGE)-$(VERSION).tar.gz $(PACKAGE)-$(VERSION)
 	rm -rf $(PACKAGE)-$(VERSION)
 

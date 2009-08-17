@@ -1,0 +1,283 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.1.2//EN"
+       	"http://www.oasis-open.org/docbook/xml/4.1.2/docbookx.dtd" [
+<!ENTITY version SYSTEM "version.xml">
+]>
+
+<refentry id="checksums.1">
+
+<refentryinfo>
+    <!-- These information are shown on the manpage -->
+    <authorgroup>
+        <author><surname>Frohner</surname><firstname>Akos</firstname></author>
+    </authorgroup>
+    <date>August 2009</date>
+    <productname>parec</productname>
+    <productnumber>&version;</productnumber>
+    <title>parallel recursive checksums</title>
+    <!-- These information are not shown -->
+    <copyright>
+        <year>2009</year>
+        <holder>Akos Frohner</holder>
+    </copyright>
+</refentryinfo>
+
+<refmeta>
+    <refentrytitle>checksums</refentrytitle>
+    <manvolnum>1</manvolnum>
+</refmeta>
+
+<refnamediv>
+    <refname>checksums</refname>
+    <refpurpose>
+        Calculates multiple checksums on files and directories.
+    </refpurpose>
+</refnamediv>
+
+<refsynopsisdiv>
+    <cmdsynopsis>
+	<command>checksums</command>
+    <group>
+        <arg choice="plain"><option>-h, --help</option></arg>
+    </group>
+    <group>
+        <arg choice="plain"><option>-v, --verbose</option></arg>
+    </group>
+    <group>
+        <arg choice="plain"><option>-a, --algorithm <replaceable>ALG</replaceable></option></arg>
+    </group>
+    <group>
+        <arg choice="plain"><option>-p, --prefix <replaceable>XP</replaceable></option></arg>
+    </group>
+    <group>
+        <arg choice="plain"><option>-e, --exclude <replaceable>PTN</replaceable></option></arg>
+    </group>
+    <group>
+        <arg choice="plain"><option>-c, --check, --verify</option></arg>
+    </group>
+    <group>
+        <arg choice="plain"><option>-f, --force</option></arg>
+    </group>
+    <group>
+        <arg choice="plain"><option>-w, --wipe, --purge</option></arg>
+    </group>
+
+	<arg choice="plain" rep="repeat"><option><replaceable>FILE/DIRECTORY</replaceable></option></arg>
+    </cmdsynopsis>
+</refsynopsisdiv>
+
+<refsect1>
+    <title>DESCRIPTION</title>
+    <para>
+	<command>checksums</command> is a command-line tool for generating
+    multiple recursive checksums for files and directories.
+    </para>
+
+    <refsect2>
+    <title>Multiple Checksums</title>
+    <para>
+    When copying or transferring large datasets you may want to make sure
+    that the destination copy is identical to the source. The easiest way
+    to achieve this is to compare their checksums.
+    </para>
+    <para>
+    You may need to use different checksum algorithms in different contexts,
+    so it is often useful to calculate all checksums at the source in advance.
+    Calculating checksums is usually an I/O bound operation, so it is more
+    efficient to read the file only once and calculate all checksums at the 
+    same time and this is what provided by the 'parec' library.
+    </para>
+    </refsect2>
+
+    <refsect2>
+    <title>Directory Checksum</title>
+    <para>
+    To simplify the comparison of larger datasets, which contain multiple
+    files 'parec' also computes checksums for directories, which recursively
+    produces a single checksum for the top-level directory. This checksum
+    describes the whole dataset, so if any of its file changes, the top-level
+    checksum would be different.
+    </para>
+    <para>
+    To avoid uncertainties with the representation and ordering of file 
+    names on different platforms and using different locals the directory
+    checksum is entirely based on the ordered checksums of its content.
+    In simple words, if you rename a file in a directory, the checksum 
+    will not change.
+    </para>
+    </refsect2>
+</refsect1>
+
+<refsect1>
+    <title>OPTIONS</title>
+    <variablelist>
+
+	<varlistentry>
+	    <term>
+		<group choice="plain">
+		    <arg choice="plain"><option>-h, --help</option></arg>
+		</group>
+	    </term>
+
+	    <listitem><para>
+		Print a short help message on parameters and usage, and exit.
+	    </para></listitem>
+	</varlistentry>
+	<varlistentry>
+	    <term>
+		<group choice="plain">
+		    <arg choice="plain"><option>-q, --quiet</option></arg>
+		</group>
+	    </term>
+
+	    <listitem><para>
+		Quiet operation. No errors are printed, the return value
+        will indicate success or failure.
+	    </para></listitem>
+	</varlistentry>
+	<varlistentry>
+	    <term>
+		<group choice="plain">
+		    <arg choice="plain"><option>-v, --verbose</option></arg>
+		</group>
+	    </term>
+        
+	    <listitem><para>
+		Verbose operation: print checksums for each file.
+	    </para></listitem>
+	</varlistentry>
+	<varlistentry>
+	    <term>
+		<group choice="plain">
+		    <arg choice="plain"><option>-a, --algorithm <replaceable>ALG</replaceable></option></arg>
+		</group>
+	    </term>
+        
+	    <listitem><para>
+        Calculate checksums using <option><replaceable>ALG</replaceable></option>. 
+        The current list of algorithms can be retrieved by 
+        <userinput>openssl list-message-digest-commands</userinput>.
+	    </para></listitem>
+	</varlistentry>
+	<varlistentry>
+	    <term>
+		<group choice="plain">
+		    <arg choice="plain"><option>-p, --prefix <replaceable>XP</replaceable></option></arg>
+		</group>
+	    </term>
+        
+	    <listitem><para>
+        Use <option><replaceable>XP</replaceable></option> as prefix 
+        for the extended attributes. One can use the host's name as prefix
+        that file checksums could be easily compared once the dataset was copied to
+        a different storage along with its extended attributes.
+	    </para></listitem>
+	</varlistentry>
+	<varlistentry>
+	    <term>
+		<group choice="plain">
+		    <arg choice="plain"><option>-e, --exclude <replaceable>PTN</replaceable></option></arg>
+		</group>
+	    </term>
+        
+	    <listitem><para>
+        Exclude checking files matching <option><replaceable>PTN</replaceable></option>.
+        File and directory names are evaluated using shell's glob(3) function
+        to ignore temporary or irrelevant files and directories.
+	    </para><para>
+        Typically version control directories (e.g. 'CVS', '.svn' or '.git') 
+        and editor 'save' files (e.g. '*~' or '.*.swp') could be ignored.
+        </para></listitem>
+	</varlistentry>
+	<varlistentry>
+	    <term>
+		<group choice="plain">
+		    <arg choice="plain"><option>-c, --check, --verify</option></arg>
+		</group>
+	    </term>
+        
+	    <listitem><para>
+        Check the already calculated checksums and raise an error, if the
+        current checksum does not match with a previous one. This mode of
+        operation does not change any extended attribute, i.e. read-only.
+	    </para></listitem>
+	</varlistentry>
+	<varlistentry>
+	    <term>
+		<group choice="plain">
+		    <arg choice="plain"><option>-f, --force</option></arg>
+		</group>
+	    </term>
+        
+	    <listitem><para>
+        Force re-calculating the checksums.
+	    </para><para>
+        In the default mode of operation the command compares the modification
+        time of the file or directory with the one stored in extended attributes,
+        when the checksums were calculated and skips entries, which have not changed.
+        </para><para>
+        With the 'force' option one can ignore the previously calculated values
+        and store the newly calculated results.
+        </para></listitem>
+	</varlistentry>
+	<varlistentry>
+	    <term>
+		<group choice="plain">
+		    <arg choice="plain"><option>-w, --wipe, --purge</option></arg>
+		</group>
+	    </term>
+        
+	    <listitem><para>
+        With this option one can purge the extended attributes associated
+        with checksum calculation. This will only remove attributes with 
+        the current prefix.
+	    </para></listitem>
+	</varlistentry>
+
+
+    </variablelist>
+</refsect1>
+
+<refsect1>
+    <title>ENVIRONMENT VARIABLES</title>
+
+    <variablelist>
+	    <varlistentry>
+            <term><option><replaceable>PAREC_LOG_LEVEL</replaceable></option></term>
+            <listitem><para>
+            Specifies the log level of the library: DEBUG, INFO, WARN, ERROR.
+            If it is unset, no logging will happen.
+            </para></listitem>
+        </varlistentry>
+	    <varlistentry>
+            <term><option><replaceable>PAREC_LOG_FILE</replaceable></option></term>
+            <listitem><para>
+            Specifies the file name to write the log to. If it is unset, the
+            logging will go to the standard output.
+            </para></listitem>
+        </varlistentry>
+    </variablelist>							    	
+
+</refsect1>
+
+<refsect1>
+    <title>SEE ALSO</title>
+
+    <para>
+	<citerefentry>
+	    <refentrytitle>openssl</refentrytitle>
+	    <manvolnum>1</manvolnum>
+	</citerefentry>,
+	<citerefentry>
+	    <refentrytitle>md5sum</refentrytitle>
+	    <manvolnum>1</manvolnum>
+	</citerefentry> and
+	<citerefentry>
+	    <refentrytitle>sha1sum</refentrytitle>
+	    <manvolnum>1</manvolnum>
+	</citerefentry>
+    </para>
+</refsect1>
+
+</refentry>
+<!-- vim: set ai sw=4: -->

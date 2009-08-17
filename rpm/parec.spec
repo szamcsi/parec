@@ -5,8 +5,8 @@ Release: @AGE@
 Source: parec-%{version}.tar.gz
 Group: admin
 BuildRoot: %{_builddir}/%{name}-%{version}-root
-Requires: glibc, openssl
-#BuildRequires: gcc, openssl-devel
+Requires: glibc, openssl, python
+#BuildRequires: gcc, openssl-devel, attr, python-devel >= 2.3, docbook-style-xsl, docbook-utils, libxslt
 License: LGPLv2.1
 Prefix: /usr
 
