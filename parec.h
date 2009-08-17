@@ -28,13 +28,11 @@ extern "C" {
  * - CHECK, calculate new checksums, but only compare them with
  *          already stored values
  * - FORCE, calculate new cheksums, regarless of any stored value
- * - PURGE, delete checksums, instead of storing them
  */
 typedef enum {
     PAREC_METHOD_DEFAULT,
     PAREC_METHOD_CHECK,
     PAREC_METHOD_FORCE,
-    PAREC_METHOD_PURGE
 } parec_method;
 
 
@@ -85,6 +83,16 @@ const char *parec_get_checksum_name(parec_ctx *ctx, int idx);
  * The caller should not deallocate the returned string.
  */
 const char *parec_get_xattr_name(parec_ctx *ctx, int idx);
+
+/**
+ * Get the value of the extended attribute for a given checksum algorithm.
+ * @param ctx   The parec context.
+ * @param idx   The index of the checksum.
+ * @param name      The file or directory name.
+ * @return the value of the checksum in hexadecimal encoding and NULL in case of an error.
+ * The caller should deallocate the returned string.
+ */
+char *parec_get_xattr_value(parec_ctx *ctx, int idx, const char *name);
 
 /**
  * Set processing method.
@@ -145,10 +153,19 @@ const char *parec_get_error(parec_ctx *ctx);
  * Process a file or directory.
  * The checksum values are set in extended attributes.
  * @param ctx       The parec context.
- * @param filename  The file name.
+ * @param name      The file or directory name.
  * @return 0 when successful and -1 in case of an error.
  */
-int parec_process(parec_ctx *ctx, const char *filename);
+int parec_process(parec_ctx *ctx, const char *name);
+
+/**
+ * Purge a file or directory.
+ * The checksum values are remove from the extended attributes recursively.
+ * @param ctx       The parec context.
+ * @param name      The file or directory name.
+ * @return 0 when successful and -1 in case of an error.
+ */
+int parec_purge(parec_ctx *ctx, const char *name);
 
 #ifdef __cplusplus
 }

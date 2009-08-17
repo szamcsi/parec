@@ -13,7 +13,7 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <sys/xattr.h>
+#include <stdlib.h>
 #include <parec.h>
 #include <getopt.h>
 
@@ -42,6 +42,7 @@ static struct option long_options[] = {
 
 int verbose_flag = 0;
 int default_checksums_flag = 1;
+int purge_flag = 0;
 
 int main(int argc, char *argv[]) {
     int c;
@@ -101,10 +102,7 @@ int main(int argc, char *argv[]) {
                 }
                 break;
             case 'w':
-                if (parec_set_method(ctx, PAREC_METHOD_PURGE)) {
-                    fprintf(stderr, "ERROR: %s\n", parec_get_error(ctx));
-                    return 1;
-                }
+                purge_flag = 1;
                 verbose_flag = 0;
                 break;
             case ':':
@@ -127,25 +125,28 @@ int main(int argc, char *argv[]) {
     }
 
     for (int i = 0; i < argc; i++) {
-        if (parec_process(ctx, argv[i])) {
-            fprintf(stderr, "ERROR: %s\n", parec_get_error(ctx));
-            return 1;
+        if (purge_flag) {
+            if (parec_purge(ctx, argv[i])) {
+                fprintf(stderr, "ERROR: %s\n", parec_get_error(ctx));
+                return 1;
+            }
         }
-        if (verbose_flag) {
-            unsigned char x_value[255];
-            ssize_t x_len;
-            for (int a = 0; a < parec_get_checksum_count(ctx); a++) {
-                const char *x_name = parec_get_xattr_name(ctx, a);
-                const char *a_name = parec_get_checksum_name(ctx, a);
-                if ((x_len = getxattr(argv[i], x_name, x_value, 255)) < 0) {
-                    fprintf(stderr, "Getting attribute %s has failed on %s\n", x_name, argv[i]);
-                    return 1;
+        else {
+            if (parec_process(ctx, argv[i])) {
+                fprintf(stderr, "ERROR: %s\n", parec_get_error(ctx));
+                return 1;
+            }
+            if (verbose_flag) {
+                for (int a = 0; a < parec_get_checksum_count(ctx); a++) {
+                    char *x_value = parec_get_xattr_value(ctx, a, argv[i]);
+                    const char *a_name = parec_get_checksum_name(ctx, a);
+                    if (!x_value || !a_name) {
+                        fprintf(stderr, "ERROR: %s\n", parec_get_error(ctx));
+                        return 1;
+                    }
+                    printf("%s(%s) = %s\n", a_name, argv[i], x_value);
+                    free(x_value);
                 }
-                printf("%s(%s) = ", a_name, argv[i]);
-                for (int d = 0; d < x_len; d++) {
-                    printf("%02x", x_value[d]);
-                }
-                printf("\n");
             }
         }
     }

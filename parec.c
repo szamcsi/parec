@@ -215,6 +215,8 @@ int parec_add_checksum(parec_ctx *ctx, const char *alg)
     if (!alg)
         return 0;
 
+    parec_log4c_DEBUG("Adding checksum '%s'", alg);
+
     // extending the algorithms array, if necessary
     if (ctx->algorithms == ctx->alg_len) {
         ctx->alg_len *= 2;
@@ -281,12 +283,47 @@ const char *parec_get_xattr_name(parec_ctx *ctx, int idx)
     return ctx->xattr_algorithm[idx];
 }
 
+char *parec_get_xattr_value(parec_ctx *ctx, int idx, const char *name)
+{
+    int dlen;
+    unsigned char digest[EVP_MAX_MD_SIZE];
+    char *hex_digest;
+
+    if (!ctx)
+        return NULL;
+
+    if (idx < 0 || idx >= ctx->algorithms) {
+        PAREC_ERROR(ctx, "parec: index %d is out of range [0,%d)", idx, ctx->algorithms);
+        return NULL;
+    }
+
+    if ((dlen = getxattr(name, ctx->xattr_algorithm[idx], digest, EVP_MAX_MD_SIZE)) < 0 && (errno != ENODATA)) {
+        PAREC_ERROR(ctx, "parec: fetching attribute %s has failed on %s with '%s(%d)'.\n", ctx->xattr_algorithm[idx], name, strerror(errno), errno);
+        return NULL;
+    }
+
+    hex_digest = calloc(sizeof(*hex_digest), dlen * 2 + 1);
+    if (!hex_digest) {
+        PAREC_ERROR(ctx, "parec: out of memory");
+        return NULL;
+    }
+
+    for (int d = 0; d < dlen; d++) {
+        sprintf(&hex_digest[d * 2], "%02x", digest[d]);
+    }
+    hex_digest[dlen * 2 + 1] = '\0';
+
+    return hex_digest;
+}
+
 int parec_add_exclude_pattern(parec_ctx *ctx, const char *pattern)
 {
     PAREC_CHECK_CONTEXT(ctx)
 
     if (!pattern)
         return 0;
+
+    parec_log4c_DEBUG("Adding pattern '%s'", pattern);
 
     // extending the exclude array, if necessary
     if (ctx->excludes == ctx->alg_len) {
@@ -404,70 +441,9 @@ int parec_set_method(parec_ctx *ctx, parec_method method)
 {
     PAREC_CHECK_CONTEXT(ctx)
 
+    parec_log4c_DEBUG("Setting processing method to %d", method);
+
     ctx->method = method;
-
-    return 0;
-}
-
-/* Purging extended attributes */
-static int _parec_purge(parec_ctx *ctx, const char *name)
-{
-    int rc;
-    for (int a = 0; a < ctx->algorithms; a++) {
-        parec_log4c_DEBUG("Removing xattr(%s)", ctx->xattr_algorithm[a]);
-        // sliently ignoring, if the attribute was not set before
-        if ((rc = removexattr(name, ctx->xattr_algorithm[a])) && (errno != ENODATA)) {
-            PAREC_ERROR(ctx, "parec: removing attribute %s has failed on %s with '%s(%d)'.\n", ctx->xattr_algorithm[a], name, strerror(errno), errno);
-            return -1;
-        }
-    }
-    parec_log4c_DEBUG("Removing xattr(%s)", ctx->xattr_mtime);
-    // sliently ignoring, if the attribute was not set before
-    if ((rc = removexattr(name, ctx->xattr_mtime)) && (errno != ENODATA)) {
-        PAREC_ERROR(ctx, "parec: removing attribute %s has failed on %s with '%s(%d)'.\n", ctx->xattr_mtime, name, strerror(errno), errno);
-        return -1;
-    }
-    return 0;
-}
-
-static int _parec_file(parec_ctx *ctx, const char *filename, EVP_MD_CTX *md_ctx) {
-    int a,n;
-    unsigned char *buffer;
-
-    buffer = malloc(sizeof(*(buffer)) * BUFLEN);
-    if (!buffer) {
-        PAREC_ERROR(ctx, "parec: out of memory");
-        return -1;
-    }
-
-    // processing the file by blocks
-    FILE *f = fopen(filename, "rb");
-    if (!f) {
-        PAREC_ERROR(ctx, "parec: could not open file '%s'", filename);
-        return -1;
-    }
-
-    // giving some hints to the kernel about our usage pattern
-    if (posix_fadvise(fileno(f), 0, 0, POSIX_FADV_SEQUENTIAL | POSIX_FADV_DONTNEED)) {
-        PAREC_ERROR(ctx, "parec: could not advise the kernel on buffer usage: %s(%d)", strerror(errno), errno);
-    }
-
-    while (feof(f) == 0) {
-        n = fread(buffer, sizeof (unsigned char), BUFLEN, f);
-        if (n > 0) {
-            // processing one block
-            for (a = 0; a < ctx->algorithms; a++) {
-                if (EVP_DigestUpdate(&md_ctx[a], buffer, n) != 1) {
-                    PAREC_ERROR(ctx, "parec: calculating digest '%s' has failed", ctx->algorithm[a]);
-                    return -1;
-                }
-            }
-        }
-    }
-    // we already have the final block, so the file can be closed
-    fclose(f);
-
-    free (buffer);
 
     return 0;
 }
@@ -493,6 +469,134 @@ static int _parec_filter(parec_ctx *ctx, const char *dname)
     return 0;
 }
 
+
+/* Purging extended attributes */
+static int _parec_purge(parec_ctx *ctx, const char *name)
+{
+    int rc;
+    for (int a = 0; a < ctx->algorithms; a++) {
+        parec_log4c_DEBUG("Removing xattr(%s) of '%s'", ctx->xattr_algorithm[a], name);
+        // sliently ignoring, if the attribute was not set before
+        if ((rc = removexattr(name, ctx->xattr_algorithm[a])) && (errno != ENODATA)) {
+            PAREC_ERROR(ctx, "parec: removing attribute %s has failed on %s with '%s(%d)'.\n", ctx->xattr_algorithm[a], name, strerror(errno), errno);
+            return -1;
+        }
+    }
+    parec_log4c_DEBUG("Removing xattr(%s) of '%s'", ctx->xattr_mtime, name);
+    // sliently ignoring, if the attribute was not set before
+    if ((rc = removexattr(name, ctx->xattr_mtime)) && (errno != ENODATA)) {
+        PAREC_ERROR(ctx, "parec: removing attribute %s has failed on %s with '%s(%d)'.\n", ctx->xattr_mtime, name, strerror(errno), errno);
+        return -1;
+    }
+    return 0;
+}
+
+int parec_purge(parec_ctx *ctx, const char *name)
+{
+    int rc;
+    struct stat p_stat;
+
+    PAREC_CHECK_CONTEXT(ctx)
+
+    parec_log4c_DEBUG("Purging '%s'", name);
+
+    // purging the entry itself
+    if (_parec_purge(ctx, name)) {
+        return -1;
+    }
+
+    // checking if the entry is a directory
+    if ((rc = stat(name, &p_stat))) {
+        PAREC_ERROR(ctx, "parec: could not stat %s (%d)", name, rc);
+        return -1;
+    }
+    // skip the rest, if it is not a directory
+    if (!S_ISDIR(p_stat.st_mode)) {
+        return 0;
+    }
+
+    struct dirent *p_dirent;
+    char full_name[PATHLEN], full_dirname[PATHLEN];
+    unsigned int max_name_len;
+
+    DIR *d = opendir(name);
+    if (!d) {
+        PAREC_ERROR(ctx, "parec: could not open directory '%s'", name);
+        return -1;
+    }
+
+    // pre-calculating the directory name
+    strncpy(full_dirname, name, PATHLEN);
+    max_name_len = strlen(full_dirname);
+    if (max_name_len == PATHLEN) {
+        PAREC_ERROR(ctx, "parec: too long name '%s'", name);
+        return -1;
+    }
+    // make sure there is a slash at the end
+    if (full_dirname[max_name_len - 1] != '/') {
+        max_name_len++;
+        full_dirname[max_name_len - 1] = '/';
+        full_dirname[max_name_len] = '\0';
+    }
+    max_name_len = PATHLEN - max_name_len;
+    parec_log4c_DEBUG("full_dirname = %s", full_dirname);
+
+    while ((p_dirent = readdir(d)) != NULL) {
+        if (_parec_filter(ctx, p_dirent->d_name)) continue;
+        strncpy(full_name, full_dirname, PATHLEN);
+        strncat(full_name, p_dirent->d_name, max_name_len); 
+        if (parec_purge(ctx, full_name)) return -1;
+    }
+
+    if (closedir(d)) {
+        PAREC_ERROR(ctx, "parec: failed to close directory '%s' with '%s(%d)'.\n", name, strerror(errno), errno);
+        return -1;
+    }
+
+    return 0;
+}
+
+static int _parec_file(parec_ctx *ctx, const char *filename, EVP_MD_CTX *md_ctx) {
+    int a,n;
+    unsigned char *buffer;
+
+    buffer = malloc(sizeof(*(buffer)) * BUFLEN);
+    if (!buffer) {
+        PAREC_ERROR(ctx, "parec: out of memory");
+        return -1;
+    }
+
+    // processing the file by blocks
+    FILE *f = fopen(filename, "rb");
+    if (!f) {
+        PAREC_ERROR(ctx, "parec: could not open file '%s'", filename);
+        return -1;
+    }
+
+    // giving some hints to the kernel about our usage pattern
+    if (posix_fadvise(fileno(f), 0, 0, POSIX_FADV_SEQUENTIAL | POSIX_FADV_DONTNEED)) {
+        parec_log4c_WARN("parec: could not advise the kernel on buffer usage: %s(%d)", strerror(errno), errno);
+    }
+
+    while (feof(f) == 0) {
+        n = fread(buffer, sizeof (unsigned char), BUFLEN, f);
+        if (n > 0) {
+            // processing one block
+            for (a = 0; a < ctx->algorithms; a++) {
+                if (EVP_DigestUpdate(&md_ctx[a], buffer, n) != 1) {
+                    PAREC_ERROR(ctx, "parec: calculating digest '%s' has failed", ctx->algorithm[a]);
+                    return -1;
+                }
+            }
+        }
+    }
+    // we already have the final block, so the file can be closed
+    fclose(f);
+
+    free (buffer);
+
+    return 0;
+}
 
 // The directory checksum is the checksum of the entry checksums.
 // To be independent of the order or name of the entries, the 
@@ -584,7 +688,7 @@ static int _parec_directory(parec_ctx *ctx, const char *dirname, EVP_MD_CTX *md_
             // we have to allocate an array for the digests at the first time
             // we know the exact size of one digest of a particular algorithm
             if (!x_dlen[a]) {
-                if ((x_dlen[a] = getxattr(full_name, ctx->xattr_algorithm[a], &x_digest_tmp, EVP_MAX_MD_SIZE)) < 0 && (errno != ENODATA)) {
+                if ((x_dlen[a] = getxattr(full_name, ctx->xattr_algorithm[a], x_digest_tmp, EVP_MAX_MD_SIZE)) < 0 && (errno != ENODATA)) {
                     PAREC_ERROR(ctx, "parec: fetching attribute %s has failed on %s with '%s(%d)'.\n", ctx->xattr_algorithm[a], full_name, strerror(errno), errno);
                 }
                 // allocating the array of (dcount * (x_dlen[a] + 1))
@@ -641,16 +745,6 @@ int parec_process(parec_ctx *ctx, const char *name) {
 
     PAREC_CHECK_CONTEXT(ctx)
 
-    if (ctx->method == PAREC_METHOD_PURGE) {
-        return _parec_purge(ctx, name);
-    }
-
-    if (ctx->method == PAREC_METHOD_FORCE) {
-        if (_parec_purge(ctx, name)) {
-            return -1;
-        }
-    }
-
     parec_log4c_DEBUG("Processing '%s'", name);
 
     // checking the modification time at the beginning
@@ -659,6 +753,12 @@ int parec_process(parec_ctx *ctx, const char *name) {
         return -1;
     }
     start_mtime = p_stat.st_mtime;
+
+    if (ctx->method == PAREC_METHOD_FORCE) {
+        if (_parec_purge(ctx, name)) {
+            return -1;
+        }
+    }
 
     // trying to check, if the file was modified since the last calculation,
     // and skip the rest, if it was not modified
@@ -736,16 +836,16 @@ int parec_process(parec_ctx *ctx, const char *name) {
         }
         else {
             parec_log4c_DEBUG("Comparing xattr(%s)", ctx->xattr_algorithm[a]);
-            if ((rc = getxattr(name, ctx->xattr_algorithm[a], &x_digest, EVP_MAX_MD_SIZE)) < 0 && (errno != ENODATA)) {
+            if ((rc = getxattr(name, ctx->xattr_algorithm[a], x_digest, EVP_MAX_MD_SIZE)) < 0 && (errno != ENODATA)) {
                 PAREC_ERROR(ctx, "parec: fetching attribute %s has failed on %s with '%s(%d)'.\n", ctx->xattr_algorithm[a], name, strerror(errno), errno);
                 return -1;
             }
             else if ((rc != (int)dlen) || memcmp(digest, x_digest, dlen)) {
-                PAREC_ERROR(ctx, "parec: checksums (%s) do not match", ctx->algorithm[a]);
+                PAREC_ERROR(ctx, "parec: checksums (%s) do not match on file '%s'", ctx->algorithm[a], name);
                 return -1;
             }
             else {
-                parec_log4c_INFO("parec: checksums (%s) do match", ctx->algorithm[a]);
+                parec_log4c_INFO("parec: checksums (%s) do match on file '%s'", ctx->algorithm[a], name);
             }
         }
     }
