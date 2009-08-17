@@ -23,9 +23,9 @@ static const char    *usage =
 "  -a, --algorithm ALG      Calculate checksums using ALG.\n"
 "  -p, --prefix XP          Prefix for the extended attributes.\n"
 "  -e, --exclude PTN        Exclude checking files matching PTN.\n"
-"  -c, --check              Check the already calculated checksums.\n"
+"  -c, --check, --verify    Check the already calculated checksums.\n"
 "  -f, --force              Force re-calculating the checksums.\n"
-"  -w, --wipe               Purge/wipe checksum attributes.\n";
+"  -w, --wipe, --purge      Purge/wipe checksum attributes.\n";
 
 static const char    *short_options = "hva:p:cfw";
 static struct option long_options[] = {
@@ -35,8 +35,10 @@ static struct option long_options[] = {
     {"prefix",      required_argument,  NULL, 'p'},
     {"exclude",     required_argument,  NULL, 'e'},
     {"check",       no_argument,        NULL, 'c'},
+    {"verify",      no_argument,        NULL, 'c'},
     {"force",       no_argument,        NULL, 'f'},
     {"wipe",        no_argument,        NULL, 'w'},
+    {"purge",       no_argument,        NULL, 'w'},
     { NULL,         no_argument,        NULL, 0}
 };
 
