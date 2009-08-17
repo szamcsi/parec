@@ -1,19 +1,68 @@
 #!/usr/bin/python
 
 import parec
+import os, os.path
+import unittest
 
-myparec = parec.Parec()
+testBaseDir = os.path.join(os.getcwd(), 'pdataset')
+testFiles = ('file1', 'file2')
 
-myparec.add_checksum('md5')
-myparec.add_checksum('sha1')
-print myparec.get_checksums()
+class TestParec(unittest.TestCase):
+    
+    def setUp(self):
+        self.p = parec.Parec()
 
-myparec.add_exclude_pattern('*~')
-myparec.add_exclude_pattern('.git')
-print myparec.get_exclude_patterns()
+    def test01Checksums(self):
+        self.p.add_checksum('md5')
+        self.p.add_checksum('sha1')
+        self.assertEqual(self.p.get_checksums(), ('md5', 'sha1'))
 
-myparec.set_xattr_prefix('local')
+    def test02Patterns(self):
+        self.p.add_exclude_pattern('*~')
+        self.p.add_exclude_pattern('.git')
+        self.assertEqual(self.p.get_exclude_patterns(), ('*~', '.git'))
 
-myparec.set_method('default')
-#myparec.set_method('something')
+    def test03Prefix(self):
+        self.p.set_xattr_prefix('local')
+        # TODO test it!
+
+    def test04Method(self):
+        self.p.set_method('default')
+        self.assertRaises(parec.ParecError, self.p.set_method, 'something')
+
+    def test05Process(self):
+        # cleaning up the test files, if they were left there
+        if os.path.exists(testBaseDir):
+            for file in testFiles:
+                os.remove(os.path.join(testBaseDir,  file))
+            os.rmdir(testBaseDir)
+        # creating a new test directory structure
+        os.mkdir(testBaseDir)
+        for file in testFiles:
+            df = open(os.path.join(testBaseDir, file), 'w')
+            df.write(file)
+            df.close()
+
+        # adding defaults
+        self.p.add_checksum('md5')
+        self.p.add_checksum('sha1')
+        
+        # processing the elements
+        self.p.process(testBaseDir)
+
+        self.assertEqual({'sha1': '0e120ba7eb65b8e2e931f77a4829367e57272dcb', 'md5': '79b88ec7d913ec467f9fbc47e7404ace'}, self.p.get_xattr_values(testBaseDir))
+
+        # changing a file
+        df = open(os.path.join(testBaseDir, testFiles[0]), 'w')
+        df.write('changed')
+        df.close()
+        self.p.set_method('check')
+        self.assertRaises(parec.ParecError, self.p.process, testBaseDir)
+
+        # cleanup
+        self.p.purge(testBaseDir)
+
+if __name__ == '__main__':
+    suite = unittest.TestLoader().loadTestsFromTestCase(TestParec)
+    unittest.TextTestRunner(verbosity=2).run(suite)
 

@@ -41,13 +41,29 @@ static PyObject *Parec_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
 
 static PyObject *Parec_process(Parec *self, PyObject *args)
 {
-    const char *filename;
+    const char *name;
 
-    if (!PyArg_ParseTuple(args, "s", &filename)) {
+    if (!PyArg_ParseTuple(args, "s", &name)) {
         // error already set
         return NULL;
     }
-    if (parec_process(self->ctx, filename)) {
+    if (parec_process(self->ctx, name)) {
+        PyErr_SetString(ParecError, parec_get_error(self->ctx));
+        return NULL;
+    }
+    
+    Py_RETURN_NONE;
+}
+
+static PyObject *Parec_purge(Parec *self, PyObject *args)
+{
+    const char *name;
+
+    if (!PyArg_ParseTuple(args, "s", &name)) {
+        // error already set
+        return NULL;
+    }
+    if (parec_purge(self->ctx, name)) {
         PyErr_SetString(ParecError, parec_get_error(self->ctx));
         return NULL;
     }
@@ -182,14 +198,10 @@ static PyObject *Parec_set_method(Parec *self, PyObject *args)
     } else 
     if (strcasecmp("force", smethod) == 0) {
         method = PAREC_METHOD_FORCE;
-    } else 
-    if (strcasecmp("purge", smethod) == 0) {
-        method = PAREC_METHOD_PURGE;
     } else  {
         PyErr_SetString(ParecError, "unknown method name");
         return NULL;
     }
-
 
     if (parec_set_method(self->ctx, method)) {
         PyErr_SetString(ParecError, parec_get_error(self->ctx));
@@ -199,9 +211,61 @@ static PyObject *Parec_set_method(Parec *self, PyObject *args)
     Py_RETURN_NONE;
 }
 
+static PyObject *Parec_get_xattr_values(Parec *self, PyObject *args)
+{
+    int count, i;
+    PyObject *xattr_values = NULL;
+    char *value = NULL;
+    PyObject *pvalue = NULL;
+    const char *algname = NULL;
+    const char *name;
+
+    if (!PyArg_ParseTuple(args, "s", &name)) {
+        // error already set
+        return NULL;
+    }
+
+    if ((count = parec_get_checksum_count(self->ctx)) < 0) {
+        PyErr_SetString(ParecError, parec_get_error(self->ctx));
+        return NULL;
+    }
+    
+    if ((xattr_values = PyDict_New()) == NULL) {
+        return NULL;
+    }
+
+    for (i = 0; i < count; i++) {
+        if ((algname = parec_get_checksum_name(self->ctx, i)) == NULL) {
+            PyErr_SetString(ParecError, parec_get_error(self->ctx));
+            Py_DECREF(xattr_values);
+            return NULL;
+        }
+        if ((value = parec_get_xattr_value(self->ctx, i, name)) == NULL) {
+            PyErr_SetString(ParecError, parec_get_error(self->ctx));
+            Py_DECREF(xattr_values);
+            return NULL;
+        }
+        if ((pvalue = PyString_FromString(value)) == NULL) {
+            Py_DECREF(xattr_values);
+            free(value);
+            return NULL;
+        }
+        free(value);
+        if (PyDict_SetItemString(xattr_values, algname, pvalue)) {
+            Py_DECREF(xattr_values);
+            Py_DECREF(pvalue);
+            return NULL;
+        }
+    }
+
+    return xattr_values;
+}
+
 static PyMethodDef Parec_methods[] = {
     {"process", (PyCFunction)Parec_process, METH_VARARGS, 
       "Process a file or directory." },
+    {"purge", (PyCFunction)Parec_purge, METH_VARARGS, 
+      "Purge a file or directory." },
     {"add_checksum", (PyCFunction)Parec_add_checksum, METH_VARARGS, 
      "Add a checksum algorithm." },
     {"get_checksums", (PyCFunction)Parec_get_checksums, METH_NOARGS, 
@@ -214,6 +278,8 @@ static PyMethodDef Parec_methods[] = {
      "Set the prefix for the extended attributes." },
     {"set_method", (PyCFunction)Parec_set_method, METH_VARARGS, 
      "Set the calculation method." },
+    {"get_xattr_values", (PyCFunction)Parec_get_xattr_values, METH_VARARGS, 
+      "Get the extended attributes associated with a file or directory." },
     {NULL, NULL, 0, NULL}
 };
 
@@ -277,8 +343,8 @@ initparec(void)
     Py_INCREF(&ParecType);
     PyModule_AddObject(m, "Parec", (PyObject *)&ParecType);
 
-    ParecError = PyErr_NewException("parec.error", NULL, NULL);
+    ParecError = PyErr_NewException("parec.ParecError", NULL, NULL);
     Py_INCREF(ParecError);
-    PyModule_AddObject(m, "error", ParecError);
+    PyModule_AddObject(m, "ParecError", ParecError);
 }
 

@@ -67,12 +67,9 @@ test: $(BINS)
 	LD_LIBRARY_PATH=$(CURDIR) ./parecmodule-test
 	LD_LIBRARY_PATH=$(CURDIR) ./checksums-test
 
-pytest: parecmodule.so
-	LD_LIBRARY_PATH=$(CURDIR) ./parecmodule-test
-
 clean: 
 	rm -f $(BINS) $(LIBS) *.o *.so.*
-	rm -rf dataset
+	rm -rf dataset pdataset
 
 distclean: clean
 	rm -f $(PACKAGE)-$(VERSION).tar.gz
