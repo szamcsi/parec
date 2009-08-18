@@ -1,0 +1,4 @@
+usr/bin/checksums
+usr/lib/libparec.so.*
+usr/share/man/man1/checksums*
+usr/share/doc/parec/README

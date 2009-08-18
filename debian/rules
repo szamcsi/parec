@@ -8,7 +8,7 @@
 
 include VERSION
 BUILDDIR=$(CURDIR)/debian/build/$(PACKAGE)-$(VERSION)
-INSTALLDIR=$(CURDIR)/debian/$(PACKAGE)
+INSTALLDIR=$(CURDIR)/debian/tmp
 
 PREFIX=/usr
 

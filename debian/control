@@ -7,9 +7,23 @@ Standards-Version: 3.7.2
 
 Package: parec
 Architecture: any
-Depends: ${shlibs:Depends}, ${python:Depends}
+Depends: ${shlibs:Depends}
 Description: Parallel Recursive Checksums
  This package contains a library and a simple executable
  to calculate multiple checksums of files and directories
  at the same time (saving I/O operations) and store them
  in extended attributes.
+
+Package: parec-dev
+Architecture: any
+Depends: parec (>= ${binary:Version})
+Description: Parallel Recursive Checksums development package
+ This package contains the header files and documentation
+ for development in C.
+
+Package: python-parec
+Architecture: any
+Depends: ${python:Depends}, parec (>= ${binary:Version})
+Description: Parallel Recursive Checksums Python binding
+ This package contains the Python binding for the library.
+

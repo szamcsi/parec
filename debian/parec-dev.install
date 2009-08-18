@@ -1,0 +1,5 @@
+usr/lib/libparec.so
+usr/include/parec*.h
+usr/share/man/man3/parec*
+usr/share/doc/parec/html/*
+usr/share/doc/parec/examples/*
