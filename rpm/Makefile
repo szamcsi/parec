@@ -27,7 +27,7 @@ rpm: tarball
 	cd $(BUILD); rpmbuild --define "_topdir $(CURDIR)/$(BUILD)" -ba SPECS/$(PACKAGE).spec
 	cp $(BUILD)/RPMS/*/*.rpm .
 	cp $(BUILD)/SRPMS/*.rpm .
-	rpm --define "__signature gpg" --define "_gpg_name $(DEFAULT_KEY)" --addsign $(PACKAGE)*.rpm
+	if [ -n "$(DEFAULT_KEY)" ]; then rpm --define "__signature gpg" --define "_gpg_name $(DEFAULT_KEY)" --addsign $(PACKAGE)*.rpm ; fi
 
 clean:
 	-rm -rf $(BUILD)
