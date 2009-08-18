@@ -115,11 +115,10 @@ tarball:
 	rm -rf $(PACKAGE)-$(VERSION)
 
 changelog:
-	git log $(shell git tag | tail -1).. >changes
-	dch -v $(VERSION)-$(AGE)
-	-rm -f changes
-	awk ' BEGIN { inchangelog = 0 } { if(inchangelog == 0) print } /^%changelog/ { inchangelog = 1 }' rpm/chroot-envs.spec >rpm/chroot-envs.spec.tmp
-	rpm/deblog2rpmlog >>rpm/chroot-envs.spec.tmp
-	mv rpm/chroot-envs.spec.tmp rpm/chroot-envs.spec
+	#git dch --new-version=$(VERSION)-$(AGE)
+	#$(EDITOR) debian/changelog
+	awk ' BEGIN { inchangelog = 0 } { if(inchangelog == 0) print } /^%changelog/ { inchangelog = 1 }' rpm/$(PACKAGE).spec >rpm/$(PACKAGE).spec.tmp
+	rpm/deblog2rpmlog >>rpm/$(PACKAGE).spec.tmp
+	mv rpm/$(PACKAGE).spec.tmp rpm/$(PACKAGE).spec
 
 .PHONY: default distclean clean help install changelog tarball

@@ -1,3 +1,12 @@
+parec (1.0.0-1) jaunty karmic; urgency=low
+
+  * First public release.
+  * Added Python interface.
+  * Added a manual pages and HTML documentation.
+  * Split Debian packages and RPMs: parec, parec-dev(el), python-parec
+
+ -- Frohner Ákos <akos@frohner.hu>  Tue, 18 Aug 2009 13:29:50 +0200
+
 parec (0.1.0-1) jaunty; urgency=low
 
   * Initial release.

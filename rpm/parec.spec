@@ -66,3 +66,14 @@ make prefix=${RPM_BUILD_ROOT}%{prefix} install
 /sbin/ldconfig
 
 %changelog
+* Tue Aug 18 2009 Frohner Ákos <akos@frohner.hu> 1.0.0-1
+
+- First public release.
+- Added Python interface.
+- Added a manual pages and HTML documentation.
+- Split Debian packages and RPMs: parec, parec-dev(el), python-parec
+
+* Fri Aug  7 2009 Frohner Ákos <akos@frohner.hu> 0.1.0-1
+
+- Initial release.
+
